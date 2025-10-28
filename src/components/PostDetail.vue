@@ -36,9 +36,13 @@
           </div>
 
           <div class="post-actions">
-            <button class="action-btn like-btn" @click="onLike">
+            <button v-if="!post.likedByMe" class="action-btn like-btn" @click="onLike">
               <span class="action-icon">👍</span>
               <span class="action-text">点赞 {{ post.likes || 0 }}</span>
+            </button>
+            <button v-else class="action-btn like-btn liked" @click="onUnlike">
+              <span class="action-icon">💖</span>
+              <span class="action-text">已点赞 {{ post.likes || 0 }}（点击取消）</span>
             </button>
             <button v-if="canDelete" class="action-btn delete-btn" :disabled="isDeleting" @click="deleteCurrentPost" title="删除帖子">
               <span class="action-icon">🗑️</span>
@@ -152,7 +156,7 @@
 <script setup>
 import { reactive, computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getPost, addComment, likePost, store, getAvatarByName, deletePost as _deletePost } from '../store';
+import { getPost, addComment, likePost, unlikePost, loadPostLikedState, store, getAvatarByName, deletePost as _deletePost } from '../store';
 import { deletePostComment } from '../store';
 import { supabase } from '../supabase';
 
@@ -162,6 +166,10 @@ const post = computed(() => {
   const foundPost = getPost(route.params.id);
   // 调试：打印帖子数据
   if (foundPost) {
+    if (store.user?.id && foundPost.supabase_id) {
+      // 异步探测我是否已点赞（结果写回 foundPost.likedByMe）
+      loadPostLikedState(foundPost.id);
+    }
     console.log('当前帖子数据:', foundPost);
     console.log('帖子图片:', foundPost.images);
     console.log('帖子评论:', foundPost.comments);
@@ -266,10 +274,24 @@ async function onComment() {
   }
 }
 
-function onLike() {
+async function onLike() {
   if (!post.value) return;
   if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
-  likePost(post.value.id);
+  const res = await likePost(post.value.id);
+  if (!res?.ok) {
+    if (res?.reason === 'already') alert('您已点过赞');
+    else if (res?.reason === 'no_supabase') alert('帖子尚未同步到数据库，暂无法点赞');
+    else alert('点赞失败，请稍后再试');
+  }
+}
+
+async function onUnlike() {
+  if (!post.value) return;
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
+  const res = await unlikePost(post.value.id);
+  if (!res?.ok) {
+    alert('取消点赞失败，请稍后再试');
+  }
 }
 
 function getAvatar(name) {
@@ -557,6 +579,15 @@ async function loadPostComments(postData) {
   color: #dc2626;
 }
 
+.like-btn.liked {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.like-btn.liked:hover {
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
 .delete-btn {
   background: #f7f9fa;
   color: #ef4444;
@@ -683,9 +714,6 @@ async function loadPostComments(postData) {
   transition: background-color 0.2s ease;
 }
 
-.comment-item:hover {
-  background: #f7f9fa;
-}
 
 .comment-item:last-child {
   border-bottom: none;

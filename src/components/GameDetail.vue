@@ -105,20 +105,6 @@
               placeholder="输入您的昵称"
               maxlength="20"
             />
-            <div class="rating-in-comment">
-              <span class="comment-rating-label">评分：</span>
-              <div class="comment-stars">
-                <button
-                  v-for="n in 5"
-                  :key="n"
-                  class="comment-star-btn"
-                  :class="{ active: n <= (commentHover || newComment.rating) }"
-                  @mouseenter="commentHover = n"
-                  @mouseleave="commentHover = 0"
-                  @click="newComment.rating = n"
-                >★</button>
-              </div>
-            </div>
           </div>
         </div>
         <textarea 
@@ -263,7 +249,6 @@ function withdrawRating() {
 
 // 评论系统
 const comments = computed(() => game.value?.comments || []);
-const commentHover = ref(0);
 const isWithdrawingComment = ref(false);
 function canWithdrawComment(c){
   if (!store.user) return false;
@@ -286,8 +271,7 @@ async function withdrawComment(c){
 
 const newComment = reactive({
   author: '',
-  content: '',
-  rating: 0
+  content: ''
 });
 
 const canSubmit = computed(() => {
@@ -300,8 +284,7 @@ function submitComment() {
   
   const commentData = {
     author: newComment.author.trim(),
-    content: newComment.content.trim(),
-    rating: newComment.rating
+    content: newComment.content.trim()
   };
   
   const ok = addGameComment(game.value.id, commentData);
@@ -310,7 +293,6 @@ function submitComment() {
   // 重置表单
   newComment.author = '';
   newComment.content = '';
-  newComment.rating = 0;
 }
 
 function likeComment(commentId) {
@@ -551,35 +533,6 @@ function formatTime(timestamp) {
   font-size: 14px;
 }
 
-.rating-in-comment {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.comment-rating-label {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.comment-stars {
-  display: flex;
-  gap: 2px;
-}
-
-.comment-star-btn {
-  background: transparent;
-  border: none;
-  color: #64748b;
-  font-size: 16px;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.comment-star-btn:hover,
-.comment-star-btn.active {
-  color: #f59e0b;
-}
 
 .comment-textarea {
   width: 100%;

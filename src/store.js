@@ -838,12 +838,84 @@ export async function deletePostComment(postId, commentId) {
   }
 }
 
-export function likePost(postId) {
-  if (!store.user?.id) return null; // 未登录不允许点赞
+export async function likePost(postId) {
+  if (!store.user?.id) return { ok: false, reason: 'auth' }; // 必须登录
   const p = getPost(postId);
-  if (!p) return null;
-  p.likes = (p.likes || 0) + 1;
-  return p.likes;
+  if (!p) return { ok: false, reason: 'not_found' };
+
+  // 必须有 Supabase 记录，才能进行一次性点赞约束
+  if (!p.supabase_id) {
+    console.warn('该帖子尚未同步到数据库，无法点赞');
+    return { ok: false, reason: 'no_supabase' };
+  }
+
+  try {
+    const payload = { post_id: p.supabase_id, user_id: store.user.id };
+    const { error } = await supabase.from('post_likes').insert([payload]);
+
+    if (error) {
+      // 23505: unique_violation（重复点赞）
+      if (error.code === '23505' || /unique/i.test(error.message || '')) {
+        console.info('用户已点赞过该帖子');
+        p.likedByMe = true; // 同步本地状态
+        return { ok: false, reason: 'already' };
+      }
+      console.error('点赞失败:', error);
+      return { ok: false, reason: 'db_error', error };
+    }
+
+    // 成功插入关系，本地计数 +1，并标记 likedByMe
+    p.likes = (p.likes || 0) + 1;
+    p.likedByMe = true;
+    return { ok: true, count: p.likes };
+  } catch (e) {
+    console.error('点赞异常:', e);
+    return { ok: false, reason: 'exception', error: e };
+  }
+}
+
+export async function unlikePost(postId) {
+  if (!store.user?.id) return { ok: false, reason: 'auth' };
+  const p = getPost(postId);
+  if (!p) return { ok: false, reason: 'not_found' };
+  if (!p.supabase_id) return { ok: false, reason: 'no_supabase' };
+  try {
+    const { error } = await supabase
+      .from('post_likes')
+      .delete()
+      .eq('post_id', p.supabase_id)
+      .eq('user_id', store.user.id);
+    if (error) {
+      console.error('取消点赞失败:', error);
+      return { ok: false, reason: 'db_error', error };
+    }
+    // 触发器会自减，这里同步本地
+    p.likes = Math.max((p.likes || 0) - 1, 0);
+    p.likedByMe = false;
+    return { ok: true, count: p.likes };
+  } catch (e) {
+    console.error('取消点赞异常:', e);
+    return { ok: false, reason: 'exception', error: e };
+  }
+}
+
+export async function loadPostLikedState(postId) {
+  const p = getPost(postId);
+  if (!p || !p.supabase_id || !store.user?.id) return false;
+  try {
+    const { data, error } = await supabase
+      .from('post_likes')
+      .select('id')
+      .eq('post_id', p.supabase_id)
+      .eq('user_id', store.user.id)
+      .limit(1);
+    if (error) { console.warn('查询点赞状态失败（可忽略）:', error); return false; }
+    p.likedByMe = Array.isArray(data) && data.length > 0;
+    return p.likedByMe;
+  } catch (e) {
+    console.warn('查询点赞状态异常（可忽略）:', e);
+    return false;
+  }
 }
 
 // 删除帖子（作者可删自己的；审核员可删所有）
