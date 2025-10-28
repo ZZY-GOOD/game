@@ -114,6 +114,10 @@ const followersList = computed(() => followersOf(user.value?.name));
 const followingList = computed(() => followingOf(user.value?.name));
 const followersCount = computed(() => followersList.value.length);
 const followingCount = computed(() => followingList.value.length);
+
+// 组件挂载时拉取一次“我的关注/粉丝”
+import { onMounted } from 'vue';
+onMounted(async () => { try { const mod = await import('../store.js'); if (mod.refreshMyRelations) await mod.refreshMyRelations(); } catch {} });
 const myGames = computed(() => (store.games || []).filter(g => g.creator === user.value?.name));
 const myPosts = computed(() => (store.posts || []).filter(p => (p.author_id && user.value?.id) ? (p.author_id === user.value.id) : (p.author === user.value?.name)));
 const tab = ref('posts');

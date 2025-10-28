@@ -127,6 +127,8 @@ onMounted(async () => {
   applyTheme();
   // 从 Supabase 加载数据
   await loadDataFromSupabase();
+  // 同步一次“我的关注/粉丝”，保证个人中心统计准确
+  try { const mod = await import('./store.js'); if (mod.refreshMyRelations) await mod.refreshMyRelations(); } catch {}
 });
 // 全局布局，仅路由切换
 </script>

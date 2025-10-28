@@ -1441,22 +1441,74 @@ export function isFollowing(targetName) {
   if (!me || !targetName) return false;
   return (ensureRel(me).following).includes(targetName);
 }
-export function followUser(targetName) {
-  const me = store.user?.name;
-  if (!me || !targetName || me === targetName) return false;
-  const my = ensureRel(me); const his = ensureRel(targetName);
-  if (!my.following.includes(targetName)) my.following.push(targetName);
-  if (!his.followers.includes(me)) his.followers.push(me);
+async function resolveProfileIdByName(name){
+  try {
+    const { data, error } = await supabase.from('profiles').select('id').eq('name', name).limit(1);
+    if (error) { console.warn('查询用户ID失败（可忽略）:', error); return null; }
+    return Array.isArray(data) && data[0]?.id || null;
+  } catch(e){ console.warn('查询用户ID异常（可忽略）:', e); return null; }
+}
+async function resolveProfileNameById(id){
+  if (!id) return null;
+  try {
+    const { data, error } = await supabase.from('profiles').select('name').eq('id', id).limit(1);
+    if (error) { console.warn('查询用户名失败（可忽略）:', error); return null; }
+    return Array.isArray(data) && (data[0]?.name || null);
+  } catch(e){ console.warn('查询用户名异常（可忽略）:', e); return null; }
+}
+export async function followUser(target){
+  const meName = store.user?.name; const meId = store.user?.id;
+  if (!meId || !meName) return false;
+  const targetName = typeof target === 'string' ? target : (target?.name || '');
+  const targetId = (typeof target === 'object' && target?.id) ? target.id : (await resolveProfileIdByName(targetName)) || (store.posts.find(p => p.author === targetName && p.author_id)?.author_id) || null;
+  // 禁止关注自己（通过名字或ID判断）
+  if (!targetName || meName === targetName || (targetId && targetId === meId)) return false;
+  // 规范化名称（若拿到ID，使用 profiles.name 作为唯一展示名）
+  const canonicalName = targetId ? (await resolveProfileNameById(targetId)) || targetName : targetName;
+  // 本地先行更新（按规范化后的名字）
+  const my = ensureRel(meName); const his = ensureRel(canonicalName);
+  if (!my.following.includes(canonicalName)) my.following.push(canonicalName);
+  if (!his.followers.includes(meName)) his.followers.push(meName);
+  store.relations = { ...store.relations, [meName]: my, [canonicalName]: his };
+  // 写库（如能解析到 targetId 才写 relations 表）
+  if (targetId) {
+    try {
+      const { error } = await supabase.from('relations').insert([{ follower: meId, following: targetId }]);
+      if (error) {
+        if (error.code === '23505') { /* 已存在，忽略 */ }
+        else if (error.code === '23514') {
+          // 违反检查约束（如 self-follow），回滚本地乐观更新
+          const _my = ensureRel(meName); const _his = ensureRel(targetName);
+          _my.following = _my.following.filter(n => n !== targetName);
+          _his.followers = _his.followers.filter(n => n !== meName);
+          store.relations = { ...store.relations, [meName]: _my, [targetName]: _his };
+          console.warn('写入关注关系失败：违反检查约束（可能尝试关注自己）');
+        } else {
+          console.warn('写入关注关系失败（保留本地）：', error);
+        }
+      }
+    } catch(e){ console.warn('写入关注关系异常（保留本地）:', e); }
+  }
   return true;
 }
-export function unfollowUser(targetName) {
-  const me = store.user?.name;
-  if (!me || !targetName) return false;
-  const my = ensureRel(me); const his = ensureRel(targetName);
+export async function unfollowUser(target){
+  const meName = store.user?.name; const meId = store.user?.id;
+  if (!meId || !meName) return false;
+  const targetName = typeof target === 'string' ? target : (target?.name || '');
+  const targetId = (typeof target === 'object' && target?.id) ? target.id : (await resolveProfileIdByName(targetName)) || (store.posts.find(p => p.author === targetName && p.author_id)?.author_id) || null;
+  if (!targetName) return false;
+  // 本地更新
+  const my = ensureRel(meName); const his = ensureRel(targetName);
   my.following = my.following.filter(n => n !== targetName);
-  his.followers = his.followers.filter(n => n !== me);
-  // 触发响应式
-  store.relations = { ...store.relations, [me]: my, [targetName]: his };
+  his.followers = his.followers.filter(n => n !== meName);
+  store.relations = { ...store.relations, [meName]: my, [targetName]: his };
+  // 删库
+  if (targetId) {
+    try {
+      const { error } = await supabase.from('relations').delete().eq('follower', meId).eq('following', targetId);
+      if (error) console.warn('删除关注关系失败（已更新本地）:', error);
+    } catch(e){ console.warn('删除关注关系异常（已更新本地）:', e); }
+  }
   return true;
 }
 export function followersOf(name) {
@@ -1464,6 +1516,55 @@ export function followersOf(name) {
 }
 export function followingOf(name) {
   return ensureRel(name).following.map(n => ({ id: n, name: n, avatar: getAvatarByName(n) }));
+}
+
+// 从数据库同步当前登录用户的关注/粉丝（将 relations 表真实数据映射为本地按“名字”索引的结构）
+export async function refreshMyRelations() {
+  const meId = store.user?.id; const meName = store.user?.name;
+  if (!meId || !meName) return false;
+  try {
+    // 取 followers（谁关注了我）
+    const [{ data: followersRows, error: folErr1 }, { data: followingRows, error: folErr2 }] = await Promise.all([
+      supabase.from('relations').select('follower').eq('following', meId),
+      supabase.from('relations').select('following').eq('follower', meId)
+    ]);
+    if (folErr1) console.warn('加载粉丝失败：', folErr1);
+    if (folErr2) console.warn('加载关注失败：', folErr2);
+
+    const followerIds = (followersRows || []).map(r => r.follower);
+    const followingIds = (followingRows || []).map(r => r.following);
+    const needIds = Array.from(new Set([...followerIds, ...followingIds].filter(Boolean)));
+
+    let idToName = {}; let idToAvatar = {};
+    if (needIds.length) {
+      const { data: profs, error: pErr } = await supabase.from('profiles').select('id,name,avatar_url').in('id', needIds);
+      if (pErr) console.warn('加载用户档案失败：', pErr);
+      (profs || []).forEach(p => { idToName[p.id] = p.name || ''; idToAvatar[p.id] = p.avatar_url || ''; });
+    }
+
+    const followerNames = followerIds.map(id => idToName[id]).filter(Boolean);
+    const followingNames = followingIds.map(id => idToName[id]).filter(Boolean);
+
+    const my = ensureRel(meName);
+    // 以数据库为准，覆盖本地，避免别名残留导致的重复统计
+    my.followers = Array.from(new Set(followerNames));
+    my.following = Array.from(new Set(followingNames));
+    // 缓存头像
+    const nameById = idToName; const avatarById = idToAvatar;
+    const setAvatarByName = (n) => {
+      const id = Object.keys(nameById).find(k => nameById[k] === n);
+      const av = id ? (avatarById[id] || '') : '';
+      store.profiles[n] = { ...(store.profiles[n] || {}), avatar: av || store.profiles[n]?.avatar || '' };
+    };
+    my.followers.forEach(setAvatarByName);
+    my.following.forEach(setAvatarByName);
+
+    store.relations = { ...store.relations, [meName]: my };
+    return true;
+  } catch (e) {
+    console.warn('同步关注/粉丝失败：', e);
+    return false;
+  }
 }
 
 /* 游戏评分系统 - 每人只能评分一次 */

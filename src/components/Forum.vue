@@ -31,7 +31,11 @@
               </div>
             </div>
             <div class="post-actions">
-              <button class="follow-btn" @click.stop="toggleFollow(p.author)">
+              <button
+                v-if="p.author_id !== store.user?.id && p.author !== store.user?.name"
+                class="follow-btn"
+                @click.stop="toggleFollow(p)"
+              >
                 {{ isFollowing(p.author) ? '已关注' : '关注' }}
               </button>
               <button v-if="isModerator" class="delete-btn" @click.stop="deletePost(p.id)" title="删除帖子">
@@ -104,10 +108,11 @@ function getAvatar(name){
 function isFollowing(name){
   return _isFollowing(name);
 }
-function toggleFollow(name){
+function toggleFollow(p){
   if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: '/forum' } }); return; }
-  if (_isFollowing(name)) unfollowUser(name);
-  else followUser(name);
+  const target = { id: p.author_id || null, name: p.author };
+  if (_isFollowing(target.name)) unfollowUser(target);
+  else followUser(target);
 }
 function deletePost(postId) {
   if (confirm('确定要删除这个帖子吗？此操作不可撤销。')) {
