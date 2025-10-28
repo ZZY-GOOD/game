@@ -139,6 +139,8 @@ function migrate(data) {
   base.user = src.user ?? base.user;
 
   base.games = Array.isArray(src.games) ? src.games : base.games;
+  // 过滤掉本地占位或未写入数据库的游戏
+  base.games = (base.games || []).filter(g => !!g.supabase_id);
   base.posts = Array.isArray(src.posts) ? src.posts.map(post => ({
     ...post,
     comments: Array.isArray(post.comments) ? post.comments : [],
@@ -280,6 +282,7 @@ export async function loadDataFromSupabase() {
           id: post.id,
           title: post.title,
           author: post.author_name || post.profiles?.name || '匿名',
+          author_id: post.author_id || null,
           content: post.content || '',
           createdAt: new Date(post.created_at).getTime(),
           likes: post.likes || 0,
@@ -416,7 +419,7 @@ export async function addGame(game) {
     creator: creatorName,
     supabase_id: null
   };
-  store.games.unshift(newGame);
+  // 延后入列表：仅当写库成功后再 push
   
   // 2. 上传图片到 Supabase Storage
   try {
@@ -494,6 +497,9 @@ export async function addGame(game) {
       supabaseGameId = data[0].id;
       newGame.supabase_id = supabaseGameId;
       
+      // 严格以DB成功为准，现在推入本地列表
+      store.games.unshift(newGame);
+      
       // 4. 保存图集到 game_images 表
       if (galleryUrls.length > 0) {
         console.log(`正在保存 ${galleryUrls.length} 张图片到图集表...`);
@@ -569,7 +575,8 @@ export async function addPost(post) {
   const newPost = {
     id,
     title,
-    author: authorName,
+    author: authorName, // 显示用昵称快照
+    author_id: store.user?.id || null, // 所有权依据
     content,
     createdAt: Date.now(),
     likes: 0,
@@ -577,7 +584,7 @@ export async function addPost(post) {
     comments: [],
     supabase_id: null
   };
-  store.posts.unshift(newPost);
+  // 延后入列表：仅当写库成功后再 push
   
   // 2. 上传图片到 Supabase Storage
   if (images.length > 0) {
@@ -631,6 +638,9 @@ export async function addPost(post) {
     if (data && data.length > 0) {
       supabasePostId = data[0].id;
       newPost.supabase_id = supabasePostId;
+      
+      // 严格以DB成功为准，现在推入本地列表
+      store.posts.unshift(newPost);
       
       // 4. 保存图片到 post_images 表
       if (uploadedImageUrls.length > 0) {
@@ -734,24 +744,18 @@ async function ensurePostHasSupabaseId(post) {
 export async function addComment(postId, comment) {
   const p = getPost(postId);
   if (!p) return null;
+  if (!store.user?.id) return null; // 未登录不允许操作
   const id = newId('c');
   const authorName = comment.author?.trim() || store.user?.name || '匿名';
   const content = comment.content?.trim() || '';
   
-  // 1. 首先保存到本地
+  // 仅在写库成功后再入本地
   const newComment = {
     id,
     author: authorName,
     content,
     createdAt: Date.now()
   };
-  
-  // 确保 comments 数组存在
-  if (!Array.isArray(p.comments)) {
-    p.comments = [];
-  }
-  
-  p.comments.push(newComment);
   
   // 2. 然后尝试保存到 Supabase
   try {
@@ -791,61 +795,100 @@ export async function addComment(postId, comment) {
     
     if (error) {
       console.error('保存评论到Supabase失败:', error);
-      // 即使Supabase保存失败，也返回本地ID，保证用户体验
-      return id;
+      return null;
     }
     
     console.log('评论已保存到Supabase:', data);
     
+    // 写库成功后入本地
+    if (!Array.isArray(p.comments)) p.comments = [];
+    p.comments.push(newComment);
+    
   } catch (error) {
     console.error('保存评论过程中出错:', error);
+    return null;
   }
   
   return id;
 }
 
 export function likePost(postId) {
+  if (!store.user?.id) return null; // 未登录不允许点赞
   const p = getPost(postId);
   if (!p) return null;
   p.likes = (p.likes || 0) + 1;
   return p.likes;
 }
 
-// 删除帖子（仅审核员）
+// 删除帖子（作者可删自己的；审核员可删所有）
 export async function deletePost(postId) {
-  // 检查权限
-  if (!store.user?.is_moderator) {
-    console.error('只有审核员可以删除帖子');
-    return false;
-  }
-  
+  if (!store.user?.id) { console.error('未登录用户无法删除帖子'); return false; }
+
   const postIndex = store.posts.findIndex(p => p.id === postId);
-  if (postIndex === -1) {
-    console.error('帖子不存在');
-    return false;
-  }
-  
+  if (postIndex === -1) { console.error('帖子不存在'); return false; }
   const post = store.posts[postIndex];
-  
-  try {
-    // 如果帖子有 Supabase ID，从数据库中删除
-    if (post.supabase_id) {
-      const { error } = await supabase
-        .from('posts')
-        .delete()
-        .eq('id', post.supabase_id);
-      
-      if (error) {
-        console.error('从数据库删除帖子失败:', error);
-        // 即使数据库删除失败，也继续删除本地数据
-      } else {
-        console.log('帖子已从数据库删除');
+
+  const isOwner = (post.author_id && store.user?.id && post.author_id === store.user.id) || (post.author && store.user?.name && post.author === store.user.name);
+  const canModerate = !!store.user?.is_moderator;
+  if (!(isOwner || canModerate)) { console.error('无权限删除此帖子'); return false; }
+
+  // 提取 Supabase Storage 对象路径（仅限 post-images 桶）
+  const extractStoragePath = (url) => {
+    if (!url || typeof url !== 'string') return null;
+    try {
+      const u = new URL(url);
+      const p = u.pathname; // /storage/v1/object/public/post-images/<key>
+      const patterns = [
+        '/object/public/post-images/',
+        '/object/post-images/',
+        '/storage/v1/object/public/post-images/',
+        '/storage/v1/object/post-images/'
+      ];
+      for (const marker of patterns) {
+        const idx = p.indexOf(marker);
+        if (idx !== -1) return p.substring(idx + marker.length);
       }
+      const raw = url;
+      for (const marker of patterns) {
+        const idx = raw.indexOf(marker);
+        if (idx !== -1) return raw.substring(idx + marker.length).split('?')[0];
+      }
+      return null;
+    } catch { return null; }
+  };
+
+  try {
+    // 1) 删除 Storage 图片（先收集）
+    const paths = [];
+    if (Array.isArray(post.images)) {
+      for (const img of post.images) { const p = extractStoragePath(img); if (p) paths.push(p); }
     }
-    
-    // 从本地数组中删除
+    if (post.supabase_id) {
+      try {
+        const { data: imgs } = await supabase.from('post_images').select('image_url').eq('post_id', post.supabase_id);
+        (imgs || []).forEach(r => { const p = extractStoragePath(r.image_url); if (p) paths.push(p); });
+      } catch (e) { console.warn('补充查询帖子图片失败（可忽略）:', e); }
+    }
+    const uniq = Array.from(new Set(paths));
+    if (uniq.length > 0) {
+      try {
+        const { data: removed, error: removeErr } = await supabase.storage.from('post-images').remove(uniq);
+        if (removeErr) console.warn('删除帖子图片失败（可忽略）:', removeErr); else console.log('已从 Storage 删除帖子图片:', removed);
+      } catch (e) { console.warn('调用 Storage 删除帖子图片异常（可忽略）:', e); }
+    }
+
+    // 2) 删除数据库记录（评论、图片、帖子本身）
+    if (post.supabase_id) {
+      try { await supabase.from('post_comments').delete().eq('post_id', post.supabase_id); } catch (e) { console.warn('删除关联 post_comments 失败:', e); }
+      try { await supabase.from('post_images').delete().eq('post_id', post.supabase_id); } catch (e) { console.warn('删除关联 post_images 失败:', e); }
+
+      const { error } = await supabase.from('posts').delete().eq('id', post.supabase_id);
+      if (error) { console.error('从数据库删除帖子失败:', error); return false; }
+    }
+
+    // 3) 本地删除（仅当数据库删除成功或不存在 supabase_id）
     store.posts.splice(postIndex, 1);
-    console.log('帖子已删除:', postId);
+    console.log('已删除帖子:', postId);
     return true;
   } catch (error) {
     console.error('删除帖子过程中出错:', error);
@@ -1373,7 +1416,7 @@ export function getUserRating(gameId) {
 }
 
 export async function withdrawUserRating(gameId) {
-  if (!gameId || !store.user?.name) return false;
+  if (!gameId || !store.user?.id) return false; // 必须登录
   const game = getGame(gameId);
   if (!game) return false;
   if (!Array.isArray(game.ratings)) game.ratings = [];
@@ -1557,6 +1600,7 @@ export async function addGameComment(gameId, commentData) {
 }
 
 export function likeGameComment(gameId, commentId) {
+  if (!store.user?.id) return false; // 未登录不允许点赞
   if (!gameId || !commentId) return false;
   
   const game = getGame(gameId);

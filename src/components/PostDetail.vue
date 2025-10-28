@@ -3,6 +3,7 @@
     <div class="main-content">
       <!-- 帖子内容卡片 -->
       <div class="post-card">
+        <div v-if="isDeleting" class="blocking-modal" role="alertdialog" aria-live="assertive">正在删除...</div>
         <div class="post-header">
           <div class="author-info">
             <div class="avatar-wrapper">
@@ -39,7 +40,7 @@
               <span class="action-icon">👍</span>
               <span class="action-text">点赞 {{ post.likes || 0 }}</span>
             </button>
-            <button v-if="isModerator" class="action-btn delete-btn" @click="deleteCurrentPost" title="删除帖子">
+            <button v-if="canDelete" class="action-btn delete-btn" :disabled="isDeleting" @click="deleteCurrentPost" title="删除帖子">
               <span class="action-icon">🗑️</span>
               <span class="action-text">删除</span>
             </button>
@@ -108,6 +109,7 @@
   <div v-else class="weibo-layout">
     <div class="main-content">
       <div class="post-card">
+        <div v-if="isDeleting" class="blocking-modal" role="alertdialog" aria-live="assertive">正在删除...</div>
         <div class="post-body">
           <h2>未找到该帖子</h2>
           <p>抱歉，您访问的帖子不存在或已被删除。</p>
@@ -218,6 +220,13 @@ function formatTime(ts) {
 async function onComment() {
   if (!post.value) return;
   
+  // 必须登录
+  if (!store.user?.id) {
+    alert('请先登录');
+    router.push({ name: 'auth', query: { redirect: route.fullPath } });
+    return;
+  }
+  
   // 基本验证
   if (!comment.content.trim()) {
     alert('请输入评论内容');
@@ -225,7 +234,8 @@ async function onComment() {
   }
   
   try {
-    await addComment(post.value.id, comment);
+    const id = await addComment(post.value.id, comment);
+    if (!id) return;
     comment.author = '';
     comment.content = '';
   } catch (error) {
@@ -236,6 +246,7 @@ async function onComment() {
 
 function onLike() {
   if (!post.value) return;
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
   likePost(post.value.id);
 }
 
@@ -244,18 +255,31 @@ function getAvatar(name) {
 }
 
 // 检查当前用户是否为审核员
-const isModerator = computed(() => {
-  return store.user?.is_moderator || false;
+const isModerator = computed(() => store.user?.is_moderator || false);
+const isOwner = computed(() => {
+  const p = post.value;
+  if (!p || !store.user) return false;
+  if (p.author_id && store.user.id) return p.author_id === store.user.id;
+  return p.author === store.user.name;
 });
+const canDelete = computed(() => isModerator.value || isOwner.value);
 
+const isDeleting = ref(false);
 // 删除当前帖子
-function deleteCurrentPost() {
-  if (!post.value) return;
+async function deleteCurrentPost() {
+  if (!post.value || isDeleting.value) return;
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
+  if (!canDelete.value) { alert('无权限删除此帖子'); return; }
   
   if (confirm('确定要删除这个帖子吗？此操作不可撤销。')) {
-    _deletePost(post.value.id);
-    // 删除成功后返回论坛页面
-    router.push('/forum');
+    try {
+      isDeleting.value = true;
+      const ok = await _deletePost(post.value.id);
+      if (ok) router.push('/forum');
+      else alert('删除失败，请稍后再试');
+    } finally {
+      isDeleting.value = false;
+    }
   }
 }
 
@@ -399,6 +423,7 @@ async function loadPostComments(postData) {
 }
 
 /* 帖子卡片 */
+.blocking-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); color: #fff; display:flex; align-items:center; justify-content:center; z-index: 9999; font-size: 18px; }
 .post-card {
   background: var(--panel);
   border-radius: 12px;

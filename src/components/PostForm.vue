@@ -39,7 +39,7 @@
 
 <script setup>
 import { reactive, ref } from 'vue';
-import { addPost } from '../store';
+import { addPost, store } from '../store';
 import { useRouter } from 'vue-router';
 
 const router = useRouter();
@@ -65,11 +65,21 @@ async function onSubmit() {
     return;
   }
   
+  // 必须登录
+  if (!store.user?.id) {
+    alert('请先登录');
+    router.push({ name: 'auth', query: { redirect: '/forum/new' } });
+    return;
+  }
+
   isSubmitting.value = true;
   
   try {
     const result = await addPost(form);
-    // 使用本地ID进行路由跳转
+    if (!result || !result.supabaseId) {
+      alert('保存失败：未写入数据库，请稍后重试');
+      return;
+    }
     router.push(`/forum/post/${result.localId}`);
   } catch (error) {
     console.error('发布帖子失败:', error);

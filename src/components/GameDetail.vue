@@ -255,6 +255,7 @@ const totalRatings = computed(() => Array.isArray(game.value?.ratings) ? game.va
 
 function rate(n) {
   if (!game.value) return;
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
   addRating(game.value.id, n);
 }
 
@@ -278,6 +279,7 @@ const canSubmit = computed(() => {
 
 function submitComment() {
   if (!canSubmit.value || !game.value) return;
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
   
   const commentData = {
     author: newComment.author.trim(),
@@ -285,7 +287,8 @@ function submitComment() {
     rating: newComment.rating
   };
   
-  addGameComment(game.value.id, commentData);
+  const ok = addGameComment(game.value.id, commentData);
+  if (!ok) return;
   
   // 重置表单
   newComment.author = '';
@@ -295,6 +298,7 @@ function submitComment() {
 
 function likeComment(commentId) {
   if (!game.value) return;
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
   likeGameComment(game.value.id, commentId);
 }
 

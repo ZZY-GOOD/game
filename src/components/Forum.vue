@@ -105,6 +105,7 @@ function isFollowing(name){
   return _isFollowing(name);
 }
 function toggleFollow(name){
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: '/forum' } }); return; }
   if (_isFollowing(name)) unfollowUser(name);
   else followUser(name);
 }

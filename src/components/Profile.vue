@@ -115,7 +115,7 @@ const followingList = computed(() => followingOf(user.value?.name));
 const followersCount = computed(() => followersList.value.length);
 const followingCount = computed(() => followingList.value.length);
 const myGames = computed(() => (store.games || []).filter(g => g.creator === user.value?.name));
-const myPosts = computed(() => (store.posts || []).filter(p => p.author === user.value?.name));
+const myPosts = computed(() => (store.posts || []).filter(p => (p.author_id && user.value?.id) ? (p.author_id === user.value.id) : (p.author === user.value?.name)));
 const tab = ref('posts');
 
 function logout() {
@@ -131,8 +131,8 @@ function onPickAvatar(e) {
   reader.readAsDataURL(file);
 }
 
-function follow(name) { followUser(name); }
-function unfollow(name) { unfollowUser(name); }
+function follow(name) { if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: '/profile' } }); return; } followUser(name); }
+function unfollow(name) { if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: '/profile' } }); return; } unfollowUser(name); }
 function isFollowing(name) { return _isFollowing(name); }
 </script>
 

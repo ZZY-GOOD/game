@@ -36,4 +36,17 @@ const router = createRouter({
   routes,
 });
 
+// 需要登录的路由名称
+const needAuth = new Set(['add-game', 'post-new']);
+
+import { store } from '../store';
+router.beforeEach((to, from, next) => {
+  if (needAuth.has(to.name) && !store.user?.id) {
+    alert('请先登录');
+    next({ name: 'auth', query: { redirect: to.fullPath } });
+  } else {
+    next();
+  }
+});
+
 export default router;

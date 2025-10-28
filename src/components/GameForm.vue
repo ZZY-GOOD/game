@@ -73,7 +73,7 @@
 
 <script setup>
 import { reactive, ref } from 'vue';
-import { addGame } from '../store';
+import { addGame, store } from '../store';
 import { useRouter } from 'vue-router';
 
 const router = useRouter();
@@ -138,11 +138,21 @@ async function onSubmit() {
     return;
   }
   
+  // 必须登录
+  if (!store.user?.id) {
+    alert('请先登录');
+    router.push({ name: 'auth', query: { redirect: '/add' } });
+    return;
+  }
+
   isSubmitting.value = true;
   
   try {
     const result = await addGame(form);
-    // 使用本地ID进行路由跳转
+    if (!result || !result.supabaseId) {
+      alert('保存失败：未写入数据库，请稍后重试');
+      return;
+    }
     router.push(`/game/${result.localId}`);
   } catch (error) {
     console.error('添加游戏失败:', error);
