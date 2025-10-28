@@ -92,6 +92,7 @@
                 <div class="comment-header">
                   <span class="comment-author">{{ c.author }}</span>
                   <span class="comment-time">{{ formatTime(c.createdAt) }}</span>
+                  <button v-if="canWithdraw(c)" class="link danger" :disabled="isWithdrawing" @click="withdraw(c)">撤回</button>
                 </div>
                 <div class="comment-text">{{ c.content }}</div>
               </div>
@@ -152,6 +153,7 @@
 import { reactive, computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getPost, addComment, likePost, store, getAvatarByName, deletePost as _deletePost } from '../store';
+import { deletePostComment } from '../store';
 import { supabase } from '../supabase';
 
 const route = useRoute();
@@ -211,6 +213,26 @@ const comment = reactive({ author: '', content: '' });
 const showImageModal = ref(false);
 const currentImage = ref('');
 const currentImageIndex = ref(0);
+
+const isWithdrawing = ref(false);
+function canWithdraw(c){
+  if (!store.user) return false;
+  if (store.user.is_moderator) return true;
+  return (c.author_id && store.user.id && c.author_id === store.user.id);
+}
+async function withdraw(c){
+  if (!post.value || !c) return;
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
+  if (!canWithdraw(c)) { alert('无权撤回该评论'); return; }
+  if (!confirm('确认撤回这条评论？')) return;
+  try {
+    isWithdrawing.value = true;
+    const ok = await deletePostComment(post.value.id, c.id);
+    if (!ok) alert('撤回失败，请稍后再试');
+  } finally {
+    isWithdrawing.value = false;
+  }
+}
 
 function formatTime(ts) {
   const d = new Date(ts);

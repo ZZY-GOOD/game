@@ -752,7 +752,9 @@ export async function addComment(postId, comment) {
   // 仅在写库成功后再入本地
   const newComment = {
     id,
+    db_id: null,
     author: authorName,
+    author_id: store.user?.id || null,
     content,
     createdAt: Date.now()
   };
@@ -784,9 +786,9 @@ export async function addComment(postId, comment) {
       .from('post_comments')
       .insert([
         {
-          post_id: supabasePostId, // 使用Supabase的帖子UUID
-          author_id: currentUserId, // 关联到用户ID
-          author_name: authorName,  // 保存作者名字快照
+          post_id: supabasePostId,
+          author_id: currentUserId,
+          author_name: authorName,
           content: content,
           created_at: new Date().toISOString()
         }
@@ -799,8 +801,8 @@ export async function addComment(postId, comment) {
     }
     
     console.log('评论已保存到Supabase:', data);
+    if (Array.isArray(data) && data.length > 0) newComment.db_id = data[0].id;
     
-    // 写库成功后入本地
     if (!Array.isArray(p.comments)) p.comments = [];
     p.comments.push(newComment);
     
@@ -810,6 +812,30 @@ export async function addComment(postId, comment) {
   }
   
   return id;
+}
+
+export async function deletePostComment(postId, commentId) {
+  if (!store.user?.id) return false;
+  const p = getPost(postId);
+  if (!p || !Array.isArray(p.comments)) return false;
+  const idx = p.comments.findIndex(c => c.id === commentId);
+  if (idx === -1) return false;
+  const c = p.comments[idx];
+  const canModerate = !!store.user?.is_moderator;
+  const isOwner = (c.author_id && store.user?.id && c.author_id === store.user.id) || (!c.author_id && c.author && store.user?.name && c.author === store.user.name);
+  if (!(canModerate || isOwner)) return false;
+  try {
+    const targetId = c.db_id || c.id;
+    if (targetId) {
+      const { error } = await supabase.from('post_comments').delete().eq('id', targetId);
+      if (error) { console.error('删除帖子评论失败:', error); return false; }
+    }
+    p.comments.splice(idx, 1);
+    return true;
+  } catch (e) {
+    console.error('删除帖子评论异常:', e);
+    return false;
+  }
 }
 
 export function likePost(postId) {
@@ -1289,23 +1315,6 @@ export function signOut() {
   store.user = null;
 }
 
-// 创建测试审核员账号
-export function createTestModerator() {
-  store.user = {
-    id: 'test_moderator',
-    name: '测试审核员',
-    email: 'moderator@test.com',
-    username: '测试审核员',
-    is_moderator: true,
-    createdAt: new Date().toISOString()
-  };
-  
-  // 保存到本地profiles
-  store.profiles['测试审核员'] = store.user;
-  
-  console.log('已创建测试审核员账号:', store.user);
-  return true;
-}
 
 // 发送密码重置邮件
 export async function sendPasswordResetEmail(email) {
@@ -1539,7 +1548,9 @@ export async function loadGameComments(gameId) {
     }
     const list = (data || []).map(c => ({
       id: c.id,
+      db_id: c.id,
       author: c.author_name || '匿名',
+      author_id: c.author_id || null,
       content: c.content || '',
       rating: c.rating || 0,
       createdAt: new Date(c.created_at).getTime(),
@@ -1566,7 +1577,9 @@ export async function addGameComment(gameId, commentData) {
   
   const comment = {
     id: newId('gc'),
+    db_id: null,
     author: commentData.author || '匿名',
+    author_id: store.user?.id || null,
     content: commentData.content.trim(),
     rating: commentData.rating || 0,
     createdAt: Date.now(),
@@ -1587,9 +1600,11 @@ export async function addGameComment(gameId, commentData) {
         rating: comment.rating || null,
         created_at: new Date().toISOString()
       };
-      const { error } = await supabase.from('game_comments').insert([payload]);
+      const { data: ins, error } = await supabase.from('game_comments').insert([payload]).select();
       if (error) {
         console.warn('保存游戏评论到数据库失败（前端已显示）:', error);
+      } else if (ins && ins.length > 0) {
+        comment.db_id = ins[0].id;
       }
     }
   } catch (e) {
@@ -1597,6 +1612,26 @@ export async function addGameComment(gameId, commentData) {
   }
 
   return comment.id;
+}
+
+export async function deleteGameComment(gameId, commentId) {
+  if (!store.user?.id) return false;
+  const game = getGame(gameId);
+  if (!game || !Array.isArray(game.comments)) return false;
+  const idx = game.comments.findIndex(c => c.id === commentId);
+  if (idx === -1) return false;
+  const comment = game.comments[idx];
+  const canModerate = !!store.user?.is_moderator;
+  const isOwner = comment.author_id && store.user?.id && comment.author_id === store.user.id;
+  if (!(canModerate || isOwner)) return false;
+  try {
+    if (comment.db_id) {
+      const { error } = await supabase.from('game_comments').delete().eq('id', comment.db_id);
+      if (error) { console.error('删除游戏评论失败:', error); return false; }
+    }
+    game.comments.splice(idx,1);
+    return true;
+  } catch (e) { console.error('删除游戏评论异常:', e); return false; }
 }
 
 export function likeGameComment(gameId, commentId) {

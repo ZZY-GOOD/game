@@ -149,6 +149,7 @@
                 <span v-for="n in 5" :key="n" class="comment-star" :class="{ filled: n <= comment.rating }">★</span>
               </div>
               <div class="comment-time">{{ formatTime(comment.createdAt) }}</div>
+              <button v-if="canWithdrawComment(comment)" class="link danger" :disabled="isWithdrawingComment" @click="withdrawComment(comment)">撤回</button>
             </div>
           </div>
           <div class="comment-content">{{ comment.content }}</div>
@@ -156,10 +157,6 @@
             <button class="action-btn" @click="likeComment(comment.id)">
               <span class="action-icon">👍</span>
               <span>{{ comment.likes || 0 }}</span>
-            </button>
-            <button class="action-btn">
-              <span class="action-icon">💬</span>
-              <span>回复</span>
             </button>
           </div>
         </div>
@@ -192,7 +189,7 @@
 <script setup>
 import { ref, computed, reactive, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { store, getGame, addRating, getAverageStars, getUserRating, withdrawUserRating, addGameComment, likeGameComment, deleteMyGame, deleteGame as deleteGameByModerator, loadGameComments, loadGameRatings } from '../store';
+import { store, getGame, addRating, getAverageStars, getUserRating, withdrawUserRating, addGameComment, likeGameComment, deleteMyGame, deleteGame as deleteGameByModerator, loadGameComments, loadGameRatings, deleteGameComment } from '../store';
 import Carousel from './Carousel.vue';
 import { getGalleryImages } from '../utils/imageUtils.js';
 
@@ -267,6 +264,26 @@ function withdrawRating() {
 // 评论系统
 const comments = computed(() => game.value?.comments || []);
 const commentHover = ref(0);
+const isWithdrawingComment = ref(false);
+function canWithdrawComment(c){
+  if (!store.user) return false;
+  if (store.user.is_moderator) return true;
+  return (c.author_id && store.user.id && c.author_id === store.user.id);
+}
+async function withdrawComment(c){
+  if (!game.value || !c) return;
+  if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: route.fullPath } }); return; }
+  if (!canWithdrawComment(c)) { alert('无权撤回该评论'); return; }
+  if (!confirm('确认撤回这条评论？')) return;
+  try {
+    isWithdrawingComment.value = true;
+    const ok = await deleteGameComment(game.value.id, c.id);
+    if (!ok) alert('撤回失败，请稍后再试');
+  } finally {
+    isWithdrawingComment.value = false;
+  }
+}
+
 const newComment = reactive({
   author: '',
   content: '',

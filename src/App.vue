@@ -51,7 +51,6 @@
           <router-link class="btn small" to="/profile">个人中心</router-link>
         </template>
         <template v-else>
-          <button class="btn small test-btn" @click="loginAsModerator">测试审核员</button>
           <router-link class="nav-card small" to="/auth">
             <span class="nav-title">登录</span>
             <span class="nav-sub">进入个人中心</span>
@@ -71,7 +70,7 @@
 <script setup>
 import logo from './assets/cyberpunk-logo.svg';
 import { computed, ref, onMounted, watch } from 'vue';
-import { store, loadDataFromSupabase, createTestModerator } from './store';
+import { store, loadDataFromSupabase } from './store';
 import { supabase } from './supabase';
 
 const user = computed(() => store.user);
@@ -89,11 +88,6 @@ function applyTheme(){
 function toggleTheme(){ theme.value = theme.value === 'dark' ? 'light' : 'dark'; applyTheme(); }
 applyTheme();
 
-// 登录为测试审核员
-function loginAsModerator() {
-  createTestModerator();
-  alert('已登录为测试审核员！现在可以删除游戏和帖子。');
-}
 
 // 获取未读消息数
 async function loadUnreadCount() {
