@@ -99,60 +99,6 @@
               </div>
             </div>
 
-            <!-- 帖子审核卡片 -->
-            <div v-else-if="item.content_type === 'post'" class="post-card">
-              <div class="card-header">
-                <h3>📝 帖子审核</h3>
-                <span class="submission-time">{{ formatTime(item.created_at) }}</span>
-              </div>
-              
-              <div class="post-info" v-if="item.postData">
-                <h4>{{ item.postData.title }}</h4>
-                <p class="post-author">作者: {{ item.postData.author_name || '匿名' }}</p>
-                <div class="post-content">
-                  {{ item.postData.content }}
-                </div>
-                <div class="post-images" v-if="item.postData.images && item.postData.images.length > 0">
-                  <img 
-                    v-for="(image, index) in item.postData.images.slice(0, 3)" 
-                    :key="index"
-                    :src="image" 
-                    :alt="`图片 ${index + 1}`"
-                    class="post-image"
-                  />
-                  <span v-if="item.postData.images.length > 3" class="more-images">
-                    +{{ item.postData.images.length - 3 }} 张图片
-                  </span>
-                </div>
-              </div>
-
-              <div class="submitter-info">
-                <span class="submitter">提交者: {{ item.submitterData?.name || '未知用户' }}</span>
-              </div>
-
-              <div class="moderation-actions">
-                <button 
-                  class="btn approve-btn"
-                  @click="approveContent(item)"
-                  :disabled="isProcessing"
-                >
-                  ✅ 通过
-                </button>
-                <button 
-                  class="btn reject-btn"
-                  @click="showRejectModal(item)"
-                  :disabled="isProcessing"
-                >
-                  ❌ 拒绝
-                </button>
-                <button 
-                  class="btn secondary"
-                  @click="viewDetails(item)"
-                >
-                  👁️ 详情
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -248,6 +194,7 @@ async function loadPendingItems() {
         submitterData:submitter_id(id, name)
       `)
       .eq('status', 'pending')
+      .eq('content_type', 'game')
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -264,13 +211,6 @@ async function loadPendingItems() {
           .eq('id', item.content_id)
           .single();
         item.gameData = gameData;
-      } else if (item.content_type === 'post') {
-        const { data: postData } = await supabase
-          .from('posts')
-          .select('*')
-          .eq('id', item.content_id)
-          .single();
-        item.postData = postData;
       }
     }
 
@@ -290,6 +230,7 @@ async function loadProcessedItems() {
         submitterData:submitter_id(id, name)
       `)
       .in('status', ['approved', 'rejected'])
+      .eq('content_type', 'game')
       .order('moderated_at', { ascending: false })
       .limit(50);
 
@@ -307,13 +248,6 @@ async function loadProcessedItems() {
           .eq('id', item.content_id)
           .single();
         item.gameData = gameData;
-      } else if (item.content_type === 'post') {
-        const { data: postData } = await supabase
-          .from('posts')
-          .select('title')
-          .eq('id', item.content_id)
-          .single();
-        item.postData = postData;
       }
     }
 
@@ -417,8 +351,6 @@ async function confirmReject() {
 function viewDetails(item) {
   if (item.content_type === 'game') {
     router.push(`/game/${item.content_id}`);
-  } else if (item.content_type === 'post') {
-    router.push(`/forum/post/${item.content_id}`);
   }
 }
 
@@ -426,8 +358,6 @@ function viewDetails(item) {
 function getContentTitle(item) {
   if (item.content_type === 'game') {
     return item.gameData?.title || '未知游戏';
-  } else if (item.content_type === 'post') {
-    return item.postData?.title || '未知帖子';
   }
   return '未知内容';
 }
