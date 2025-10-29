@@ -150,6 +150,25 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- 17. 关注后自动回复功能：由被关注者向关注者发送一条用户消息，并更新会话
+CREATE OR REPLACE FUNCTION auto_reply_on_follow(
+  follower_id uuid,
+  following_id uuid,
+  msg text DEFAULT '感谢您的关注！（此消息为自动回复）'
+)
+RETURNS uuid AS $$
+DECLARE
+  mid uuid;
+BEGIN
+  -- 插入一条“用户消息”，发送者为被关注者，接收者为关注者
+  INSERT INTO public.messages(sender_id, receiver_id, content, message_type, created_at)
+  VALUES (following_id, follower_id, msg, 'user', now())
+  RETURNING id INTO mid;
+  -- 会话更新由触发器 handle_new_message 自动完成，避免重复累加未读
+  RETURN mid;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- 11. 创建审核通过/拒绝的触发器函数
 CREATE OR REPLACE FUNCTION handle_moderation_decision()
 RETURNS TRIGGER AS $$
@@ -294,5 +313,24 @@ BEGIN
   WHERE receiver_id = user_id AND is_read = false;
   
   RETURN COALESCE(count, 0);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 17. 关注后自动回复功能：由被关注者向关注者发送一条用户消息，并更新会话
+CREATE OR REPLACE FUNCTION auto_reply_on_follow(
+  follower_id uuid,
+  following_id uuid,
+  msg text DEFAULT '感谢您的关注！（此消息为自动回复）'
+)
+RETURNS uuid AS $$
+DECLARE
+  mid uuid;
+BEGIN
+  -- 插入一条“用户消息”，发送者为被关注者，接收者为关注者
+  INSERT INTO public.messages(sender_id, receiver_id, content, message_type, created_at)
+  VALUES (following_id, follower_id, msg, 'user', now())
+  RETURNING id INTO mid;
+  -- 会话更新由触发器 handle_new_message 自动完成，避免重复累加未读
+  RETURN mid;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

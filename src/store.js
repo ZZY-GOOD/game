@@ -1497,6 +1497,11 @@ export async function followUser(target){
         } else {
           console.warn('写入关注关系失败（保留本地）：', error);
         }
+      } else {
+        // 插入关注成功后，触发自动回复消息（由对方身份发送）
+        try {
+          await supabase.rpc('auto_reply_on_follow', { follower_id: meId, following_id: targetId });
+        } catch (e) { console.warn('自动回复消息触发失败：', e); }
       }
     } catch(e){ console.warn('写入关注关系异常（保留本地）:', e); }
   }

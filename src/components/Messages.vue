@@ -22,11 +22,11 @@
             @click="selectConversation(conversation)"
           >
             <div class="conversation-avatar">
-              {{ getOtherUser(conversation).username?.charAt(0) || '?' }}
+              {{ getOtherUser(conversation).name?.charAt(0) || '?' }}
             </div>
             <div class="conversation-info">
               <div class="conversation-name">
-                {{ getOtherUser(conversation).username || '未知用户' }}
+                {{ getOtherUser(conversation).name || '未知用户' }}
               </div>
               <div class="conversation-preview">
                 {{ conversation.lastMessage?.content || '暂无消息' }}
@@ -67,7 +67,7 @@
       <div class="messages-panel">
         <div v-if="selectedConversation" class="chat-container">
           <div class="chat-header">
-            <h3>与 {{ getOtherUser(selectedConversation).username }} 的对话</h3>
+            <h3>与 {{ getOtherUser(selectedConversation).name }} 的对话</h3>
           </div>
           
           <div class="chat-messages" ref="messagesContainer">
@@ -139,8 +139,8 @@ async function loadConversations() {
       .from('conversations')
       .select(`
         *,
-        user1:user1_id(id, username),
-        user2:user2_id(id, username),
+        user1:user1_id(id, name),
+        user2:user2_id(id, name),
         lastMessage:last_message_id(content, created_at)
       `)
       .order('last_message_at', { ascending: false });
@@ -240,6 +240,14 @@ async function sendMessage() {
   if (!newMessage.value.trim() || !selectedConversation.value || isSending.value) return;
 
   const otherUser = getOtherUser(selectedConversation.value);
+  // 限制：对方未回复前，我只能发一条
+  const last = currentMessages.value[currentMessages.value.length - 1];
+  const hasPendingMyMessage = last && last.sender_id === store.user?.id;
+  if (hasPendingMyMessage) {
+    alert('必须等对方回复后才能进行聊天');
+    return;
+  }
+
   isSending.value = true;
 
   try {
@@ -303,16 +311,10 @@ async function markConversationAsRead(conversation) {
   try {
     const otherUser = getOtherUser(conversation);
     
-    const { error } = await supabase
-      .from('messages')
-      .update({ is_read: true })
-      .eq('sender_id', otherUser.id)
-      .eq('receiver_id', store.user?.id)
-      .eq('is_read', false);
-
+    // 调用后端函数：标记该会话为已读并清零会话未读计数
+    const { error } = await supabase.rpc('mark_conversation_read', { viewer_id: store.user?.id, other_id: otherUser.id });
     if (!error) {
-      await loadUnreadCount();
-      await loadConversations();
+      await Promise.all([loadUnreadCount(), loadConversations()]);
     }
   } catch (error) {
     console.error('标记会话已读失败:', error);

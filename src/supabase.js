@@ -13,6 +13,19 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // 创建Supabase客户端（若变量缺失，会导致请求失败并在控制台给出明确错误）
-export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
+export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
+  auth: { persistSession: true, autoRefreshToken: true },
+  db: {
+    // Fail fast to surface issues instead of hanging for 30s
+    fetch: (url, options) => {
+      try {
+        const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined;
+        return fetch(url, { ...options, signal });
+      } catch {
+        return fetch(url, options);
+      }
+    }
+  }
+})
 
 export default supabase
