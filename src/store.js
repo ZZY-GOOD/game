@@ -1441,6 +1441,12 @@ export function isFollowing(targetName) {
   if (!me || !targetName) return false;
   return (ensureRel(me).following).includes(targetName);
 }
+export function isFollowingById(targetId) {
+  const me = store.user?.name;
+  if (!me || !targetId) return false;
+  const ids = store._myFollowingIds || [];
+  return ids.includes(targetId);
+}
 async function resolveProfileIdByName(name){
   try {
     const { data, error } = await supabase.from('profiles').select('id').eq('name', name).limit(1);
@@ -1470,6 +1476,11 @@ export async function followUser(target){
   if (!my.following.includes(canonicalName)) my.following.push(canonicalName);
   if (!his.followers.includes(meName)) his.followers.push(meName);
   store.relations = { ...store.relations, [meName]: my, [canonicalName]: his };
+  // 立即同步“我关注的ID集合”，保证 UI 无需刷新即可更新
+  if (targetId) {
+    const ids = Array.isArray(store._myFollowingIds) ? [...store._myFollowingIds] : [];
+    if (!ids.includes(targetId)) store._myFollowingIds = [...ids, targetId];
+  }
   // 写库（如能解析到 targetId 才写 relations 表）
   if (targetId) {
     try {
@@ -1502,6 +1513,11 @@ export async function unfollowUser(target){
   my.following = my.following.filter(n => n !== targetName);
   his.followers = his.followers.filter(n => n !== meName);
   store.relations = { ...store.relations, [meName]: my, [targetName]: his };
+  // 立即同步“我关注的ID集合”，保证 UI 无需刷新即可更新
+  if (targetId) {
+    const ids = Array.isArray(store._myFollowingIds) ? [...store._myFollowingIds] : [];
+    store._myFollowingIds = ids.filter(id => id !== targetId);
+  }
   // 删库
   if (targetId) {
     try {
@@ -1528,6 +1544,9 @@ export async function refreshMyRelations() {
       supabase.from('relations').select('follower').eq('following', meId),
       supabase.from('relations').select('following').eq('follower', meId)
     ]);
+    // 同步ID集合，便于基于ID判断是否已关注
+    store._myFollowerIds = (followersRows || []).map(r => r.follower).filter(Boolean);
+    store._myFollowingIds = (followingRows || []).map(r => r.following).filter(Boolean);
     if (folErr1) console.warn('加载粉丝失败：', folErr1);
     if (folErr2) console.warn('加载关注失败：', folErr2);
 

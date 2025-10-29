@@ -36,7 +36,7 @@
                 class="follow-btn"
                 @click.stop="toggleFollow(p)"
               >
-                {{ isFollowing(p.author) ? '已关注' : '关注' }}
+                {{ isFollowingPostAuthor(p) ? '已关注' : '关注' }}
               </button>
               <button v-if="isModerator" class="delete-btn" @click.stop="deletePost(p.id)" title="删除帖子">
                 🗑️
@@ -72,7 +72,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { store, getAvatarByName, isFollowing as _isFollowing, followUser, unfollowUser, deletePost as _deletePost } from '../store';
+import { store, getAvatarByName, isFollowing as _isFollowing, isFollowingById, followUser, unfollowUser, deletePost as _deletePost } from '../store';
 
 const router = useRouter();
 const expandedIds = ref(new Set());
@@ -108,10 +108,17 @@ function getAvatar(name){
 function isFollowing(name){
   return _isFollowing(name);
 }
+function isFollowingPostAuthor(p){
+  if (p.author_id && store.user?.id) {
+    // 优先用ID判断是否已关注，避免别名导致误判
+    if (isFollowingById && isFollowingById(p.author_id)) return true;
+  }
+  return _isFollowing(p.author);
+}
 function toggleFollow(p){
   if (!store.user?.id) { alert('请先登录'); router.push({ name: 'auth', query: { redirect: '/forum' } }); return; }
   const target = { id: p.author_id || null, name: p.author };
-  if (_isFollowing(target.name)) unfollowUser(target);
+  if (isFollowingPostAuthor(p)) unfollowUser(target);
   else followUser(target);
 }
 function deletePost(postId) {
