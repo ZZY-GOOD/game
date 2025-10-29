@@ -89,12 +89,15 @@
 
           <div class="chat-input">
             <form @submit.prevent="sendMessage" class="message-form">
-              <input 
-                v-model="newMessage" 
-                class="input message-input" 
-                placeholder="输入消息..." 
+              <textarea 
+                v-model="newMessage"
+                class="input message-input"
+                placeholder="输入消息... (Shift+Enter 换行，Enter 发送)"
                 :disabled="isSending"
-                required
+                rows="1"
+                ref="messageInput"
+                @input="autoResize"
+                @keydown.enter.exact.prevent="sendMessage"
               />
               <button 
                 type="submit" 
@@ -131,10 +134,24 @@ const newMessage = ref('');
 const isSending = ref(false);
 const unreadCount = ref(0);
 const messagesContainer = ref(null);
+const messageInput = ref(null);
+
+function autoResize(e){
+  const el = e?.target || messageInput.value;
+  if (!el) return;
+  const lineHeight = 20; // 近似行高（与全局 input 样式一致）
+  const maxRows = 4;
+  const minRows = 1;
+  el.style.height = 'auto';
+  const maxHeight = lineHeight * maxRows;
+  const newH = Math.min(Math.max(el.scrollHeight, lineHeight * minRows), maxHeight);
+  el.style.height = newH + 'px';
+}
 
 // 获取会话列表
 async function loadConversations() {
   try {
+    const me = store.user?.id;
     const { data, error } = await supabase
       .from('conversations')
       .select(`
@@ -143,6 +160,7 @@ async function loadConversations() {
         user2:user2_id(id, name),
         lastMessage:last_message_id(content, created_at)
       `)
+      .or(`user1_id.eq.${me},user2_id.eq.${me}`)
       .order('last_message_at', { ascending: false });
 
     if (error) {
@@ -241,11 +259,14 @@ async function sendMessage() {
 
   const otherUser = getOtherUser(selectedConversation.value);
   // 限制：对方未回复前，我只能发一条
-  const last = currentMessages.value[currentMessages.value.length - 1];
-  const hasPendingMyMessage = last && last.sender_id === store.user?.id;
-  if (hasPendingMyMessage) {
-    alert('必须等对方回复后才能进行聊天');
-    return;
+  // 如果对方从未在该会话中发送过“用户消息”，则限制为“一次消息等待回复”；一旦对方回复过一次，就取消限制
+  const hasOtherReplied = currentMessages.value.some(m => m.sender_id === otherUser.id && m.message_type === 'user');
+  if (!hasOtherReplied) {
+    const mySentCount = currentMessages.value.filter(m => m.sender_id === store.user?.id && m.message_type === 'user').length;
+    if (mySentCount >= 1) {
+      alert('必须等对方回复后才能进行聊天');
+      return;
+    }
   }
 
   isSending.value = true;
@@ -361,6 +382,8 @@ onMounted(async () => {
       loadUnreadCount()
     ]);
   }
+  // 初始根据内容自适应一次（空内容为一行）
+  autoResize();
 });
 </script>
 
@@ -398,7 +421,8 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: 350px 1fr;
   gap: 20px;
-  height: 600px;
+  height: calc(100vh - 180px); /* 视口高度内自适应，避免整页被撑高 */
+  min-height: 480px;
 }
 
 .conversations-panel {
@@ -547,12 +571,14 @@ onMounted(async () => {
   border-radius: 12px;
   display: flex;
   flex-direction: column;
+  min-height: 0; /* 允许子容器使用剩余高度 */
 }
 
 .chat-container {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0; /* 允许 chat-messages 挤压 */
 }
 
 .chat-header {
@@ -566,12 +592,13 @@ onMounted(async () => {
 }
 
 .chat-messages {
-  flex: 1;
+  flex: 1 1 auto;
   padding: 16px;
-  overflow-y: auto;
+  overflow-y: auto; /* 只有消息区滚动 */
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0; /* 避免撑开父级 */
 }
 
 .message-item {
@@ -608,7 +635,10 @@ onMounted(async () => {
 
 .message-text {
   margin-bottom: 4px;
-  line-height: 1.4;
+  line-height: 1.6;
+  white-space: pre-wrap; /* 保留换行并自动换行 */
+  word-break: break-word; /* 长英文或连续字符断词 */
+  overflow-wrap: anywhere; /* 极端长串也能断开 */
 }
 
 .message-time {
@@ -628,6 +658,9 @@ onMounted(async () => {
 
 .message-input {
   flex: 1;
+  resize: none;              /* 禁用手动拖拽 */
+  max-height: 160px;         /* 限高度，避免把面板撑高 */
+  overflow-y: auto;          /* 超出时在文本域内滚动 */
 }
 
 .send-btn {
@@ -660,11 +693,11 @@ onMounted(async () => {
 @media (max-width: 768px) {
   .messages-content {
     grid-template-columns: 1fr;
-    height: auto;
+    height: calc(100vh - 140px);
   }
   
   .conversations-panel {
-    height: 300px;
+    height: 280px;
   }
   
   .messages-panel {
