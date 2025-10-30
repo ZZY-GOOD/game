@@ -104,11 +104,14 @@ watch(() => props.images, (newImages) => {
 <style scoped>
 .simple-carousel {
   width: 100%;
-  height: 400px;
-  border-radius: 8px;
+  max-width: 1200px;         /* 限制最大宽度 */
+  aspect-ratio: 16 / 9;      /* 固定为 16:9 */
+  height: auto;              /* 高度随宽度与比例自动计算 */
+  margin: 0 auto;            /* 居中 */
+  border-radius: 12px;
   overflow: hidden;
-  background: #f5f5f5;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background: #0b1020;       /* 与站点风格一致的深色背景 */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 /* 主显示区域 */
@@ -202,7 +205,8 @@ watch(() => props.images, (newImages) => {
 /* 响应式设计 */
 @media (max-width: 768px) {
   .simple-carousel {
-    height: 300px;
+    max-width: 100%;
+    aspect-ratio: 16 / 9;
   }
   
   .nav-btn {
@@ -212,7 +216,7 @@ watch(() => props.images, (newImages) => {
   }
   
   .indicators {
-    bottom: 15px;
+    bottom: 12px;
   }
   
   .indicator {
