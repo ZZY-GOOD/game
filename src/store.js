@@ -1357,6 +1357,9 @@ export async function signIn(payload, opts = {}) {
     
     // 保存到本地profiles
     store.profiles[profileData.name] = store.user;
+
+    // 登录后立即刷新最新数据，避免显示旧的列表
+    try { await loadDataFromSupabase(); } catch(e) { console.warn('登录后刷新数据失败：', e); }
     
     return true;
   } catch (error) {
@@ -1377,9 +1380,19 @@ export async function sendPasswordResetEmail(email) {
     }
 
     // 确保使用正确的重定向 URL
-    const redirectUrl = window.location.hostname === 'localhost' 
-      ? 'http://localhost:5173/reset-password'
-      : 'https://gameweb-po34.vercel.app/reset-password';
+    // 动态选择重定向地址：优先使用当前站点（生产）/开发地址，否则回退到已配置的生产域名
+    let redirectUrl = 'https://game-inky-nine.vercel.app/reset-password';
+    try {
+      const origin = window.location.origin;
+      const host = window.location.hostname;
+      if (host === 'localhost') {
+        redirectUrl = 'http://localhost:5173/reset-password';
+      } else if (origin && origin.startsWith('https://')) {
+        // 当前正运行在一个可公开访问的域名上（含 vercel.app 或自定义域）
+        redirectUrl = origin + '/reset-password';
+      }
+    } catch {}
+
     
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: redirectUrl

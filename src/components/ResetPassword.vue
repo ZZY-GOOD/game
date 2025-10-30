@@ -4,14 +4,14 @@
       <div class="content">
         <h2>重置密码</h2>
         
-        <div v-if="!isValidSession" class="error-state">
+        <div v-if="!isChecking && !isValidSession" class="error-state">
           <div class="error-icon">⚠️</div>
           <h3>重置链接无效或已过期</h3>
           <p>请重新申请密码重置邮件。</p>
           <router-link class="btn" to="/auth">返回登录</router-link>
         </div>
         
-        <form v-else class="grid" @submit.prevent="onSubmit">
+        <form v-else-if="isValidSession" class="grid" @submit.prevent="onSubmit">
           <div class="info">
             <p>请输入您的新密码。</p>
           </div>
@@ -67,34 +67,39 @@ const message = ref('');
 const messageType = ref('');
 const isLoading = ref(false);
 const isValidSession = ref(false);
+const isChecking = ref(true);
+const showNew = ref(false);
+const showConfirm = ref(false);
+function toggleNew(){ showNew.value = !showNew.value; }
+function toggleConfirm(){ showConfirm.value = !showConfirm.value; }
 
 onMounted(async () => {
-  // 检查是否有有效的重置会话
-  const { data: { session } } = await supabase.auth.getSession();
-  
-  if (session && session.user) {
-    isValidSession.value = true;
-  } else {
-    // 尝试从 URL 参数中获取访问令牌
-    const accessToken = route.query.access_token;
-    const refreshToken = route.query.refresh_token;
-    
-    if (accessToken && refreshToken) {
-      try {
-        const { data, error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken
-        });
-        
-        if (error) {
-          console.error('设置会话失败:', error);
-        } else {
-          isValidSession.value = true;
-        }
-      } catch (error) {
-        console.error('处理重置令牌时出错:', error);
-      }
+  isChecking.value = true;
+  try {
+    // 1) 先看是否已存在有效会话
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && session.user) {
+      isValidSession.value = true;
+      return;
     }
+    // 2) 从URL中解析令牌（支持 hash 片段和 query 两种方式）
+    let accessToken = route.query.access_token;
+    let refreshToken = route.query.refresh_token;
+    if (!accessToken || !refreshToken) {
+      const hash = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+      const hs = new URLSearchParams(hash || '');
+      accessToken = accessToken || hs.get('access_token');
+      refreshToken = refreshToken || hs.get('refresh_token');
+    }
+    // 3) 设置会话
+    if (accessToken && refreshToken) {
+      const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+      if (!error) isValidSession.value = true; else console.error('设置会话失败:', error);
+    }
+  } catch (e) {
+    console.error('处理重置令牌时出错:', e);
+  } finally {
+    isChecking.value = false;
   }
 });
 
