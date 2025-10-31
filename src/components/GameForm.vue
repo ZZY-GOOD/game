@@ -149,11 +149,16 @@ async function onSubmit() {
   
   try {
     const result = await addGame(form);
-    if (!result || !result.supabaseId) {
-      alert('保存失败：未写入数据库，请稍后重试');
+    if (result && result.submissionId) {
+      if (result.queued) {
+        alert('提交成功：已进入审核队列，审核通过后将发布');
+      } else {
+        alert('提交成功，但未加入审核队列，请联系管理员或稍后重试');
+      }
+      router.push('/');
       return;
     }
-    router.push(`/game/${result.localId}`);
+    alert('保存失败：未写入数据库，请稍后重试');
   } catch (error) {
     console.error('添加游戏失败:', error);
     alert('添加游戏失败，请稍后重试');

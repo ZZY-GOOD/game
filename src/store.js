@@ -1,4 +1,4 @@
-import { reactive, watch } from 'vue';
+import { reactive, watch } from 'vue'; 
 import { supabase } from './supabase.js';
 
 const STORAGE_KEY = 'game_forum_store_v1';
@@ -173,7 +173,7 @@ export async function loadDataFromSupabase() {
   try {
     console.log('开始从 Supabase 加载数据...');
     
-    // 加载游戏数据（包含图集）
+    // 仅加载“已发布/审核通过”的游戏
     const { data: gamesData, error: gamesError } = await supabase
       .from('games')
       .select(`
@@ -181,6 +181,7 @@ export async function loadDataFromSupabase() {
         profiles:creator(name, avatar_url),
         game_images(image_url, position)
       `)
+      .eq('is_published', true)
       .order('created_at', { ascending: false });
     
     if (gamesError) {
@@ -225,26 +226,31 @@ export async function loadDataFromSupabase() {
         if (gameIds.length > 0) {
           const { data: aggs, error: aggErr } = await supabase
             .from('ratings')
-            .select('game_id, avg:stars.avg(), count:stars.count()')
+            .select('game_id')
             .in('game_id', gameIds)
-            .group('game_id');
+            ;
           if (aggErr) {
             console.warn('批量加载评分聚合失败:', aggErr);
           } else {
-            const map = {};
-            (aggs || []).forEach(r => {
-              map[r.game_id] = {
-                avg: Math.round((Number(r.avg) || 0) * 10) / 10,
-                count: Number(r.count) || 0
-              };
-            });
-            store.games = store.games.map(g => {
-              if (g.supabase_id && map[g.supabase_id]) {
-                const m = map[g.supabase_id];
-                return { ...g, avg: m.avg, count: m.count };
+            // 后端禁止聚合函数时，回退为计数查询每个游戏的评分行数
+            const idSet = new Set((aggs || []).map(r => r.game_id));
+            if (idSet.size > 0) {
+              const { data: rows, error: cntErr } = await supabase
+                .from('ratings')
+                .select('game_id')
+                .in('game_id', Array.from(idSet));
+              if (cntErr) {
+                console.warn('加载评分数量失败（可忽略）:', cntErr);
+              } else {
+                const countMap = {};
+                (rows || []).forEach(r => { countMap[r.game_id] = (countMap[r.game_id] || 0) + 1; });
+                store.games = store.games.map(g => (
+                  g.supabase_id && countMap[g.supabase_id]
+                    ? { ...g, count: countMap[g.supabase_id] }
+                    : g
+                ));
               }
-              return g;
-            });
+            }
           }
         }
       } catch (e) {
@@ -464,12 +470,12 @@ export async function addGame(game) {
     console.error('上传图片时出错:', error);
   }
   
-  // 3. 保存游戏信息到 Supabase
+  // 3. 保存“待审核草稿”到 game_submissions（而不是直接写入 games）
   try {
     const currentUserId = store.user?.id;
-    
-    const { data, error } = await supabase
-      .from('games')
+
+    const { data: subData, error: subErr } = await supabase
+      .from('game_submissions')
       .insert([
         {
           title: title,
@@ -479,75 +485,51 @@ export async function addGame(game) {
           background: background,
           gameplay: gameplay,
           official_url: officialUrl,
-          cover_url: coverUrl, // 使用上传后的封面 URL
-          creator: currentUserId,
+          cover_url: coverUrl,
+          gallery_urls: galleryUrls, // JSON/Array 列
+          submitter_id: currentUserId,
           created_at: new Date().toISOString()
         }
       ])
       .select();
-    
-    if (error) {
-      console.error('保存游戏到Supabase失败:', error);
+
+    if (subErr) {
+      console.error('保存待审核草稿失败:', subErr);
       return { localId: id, supabaseId: null };
     }
-    
-    console.log('游戏已保存到Supabase:', data);
-    
-    if (data && data.length > 0) {
-      supabaseGameId = data[0].id;
-      newGame.supabase_id = supabaseGameId;
-      
-      // 严格以DB成功为准，现在推入本地列表
-      store.games.unshift(newGame);
-      
-      // 4. 保存图集到 game_images 表
-      if (galleryUrls.length > 0) {
-        console.log(`正在保存 ${galleryUrls.length} 张图片到图集表...`);
-        const imageRecords = galleryUrls.map((url, index) => ({
-          game_id: supabaseGameId,
-          image_url: url,
-          position: index,
-          created_at: new Date().toISOString()
-        }));
-        
-        const { data: imageData, error: imageError } = await supabase
-          .from('game_images')
-          .insert(imageRecords)
-          .select();
-        
-        if (imageError) {
-          console.error('保存图集到数据库失败:', imageError);
-        } else {
-          console.log('图集已保存到数据库:', imageData);
-        }
-      }
-      
-      // 5. 添加到审核队列
+
+    if (Array.isArray(subData) && subData.length > 0) {
+      const submissionId = subData[0].id;
+
+      // 4. 写入审核队列，引用草稿ID
       try {
         const { error: queueError } = await supabase
           .from('moderation_queue')
           .insert([{
-            content_type: 'game',
-            content_id: supabaseGameId,
+            content_type: 'game_submission',
+            content_id: submissionId,
             submitter_id: currentUserId,
+            status: 'pending',
             created_at: new Date().toISOString()
           }]);
-        
         if (queueError) {
           console.error('添加到审核队列失败:', queueError);
+          return { localId: id, submissionId, queued: false };
         } else {
-          console.log('游戏已添加到审核队列');
+          console.log('草稿已添加到审核队列');
+          return { localId: id, submissionId, queued: true };
         }
       } catch (error) {
         console.error('添加到审核队列时出错:', error);
+        return { localId: id, submissionId, queued: false };
       }
     }
-    
   } catch (error) {
-    console.error('保存游戏过程中出错:', error);
+    console.error('保存草稿过程中出错:', error);
   }
-  
-  return { localId: id, supabaseId: supabaseGameId };
+
+  // 不再将未审核的游戏加入本地目录
+  return { localId: id, supabaseId: null };
 }
 
 // getGame函数已移至文件末尾，确保数据结构完整

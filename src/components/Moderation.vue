@@ -39,7 +39,7 @@
             class="moderation-item"
           >
             <!-- 游戏审核卡片 -->
-            <div v-if="item.content_type === 'game'" class="game-card">
+            <div v-if="item.content_type === 'game_submission'" class="game-card">
               <div class="card-header">
                 <h3>🎮 游戏审核</h3>
                 <span class="submission-time">{{ formatTime(item.created_at) }}</span>
@@ -120,7 +120,7 @@
             <div class="processed-info">
               <div class="processed-header">
                 <span class="content-type">
-                  {{ item.content_type === 'game' ? '🎮 游戏' : '📝 帖子' }}
+                  {{ item.content_type === 'game_submission' ? '🎮 游戏' : '📝 帖子' }}
                 </span>
                 <span class="processed-status">
                   {{ item.status === 'approved' ? '✅ 已通过' : '❌ 已拒绝' }}
@@ -169,7 +169,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
-import { store } from '../store';
+import { store, loadDataFromSupabase } from '../store';
 import { supabase } from '../supabase';
 import { useRouter } from 'vue-router';
 
@@ -189,29 +189,37 @@ async function loadPendingItems() {
   try {
     const { data, error } = await supabase
       .from('moderation_queue')
-      .select(`
-        *,
-        submitterData:submitter_id(id, name)
-      `)
+      .select('*')
       .eq('status', 'pending')
-      .eq('content_type', 'game')
-      .order('created_at', { ascending: true });
+      .eq('content_type', 'game_submission')
+      .order('created_at', { ascending: true })
+      .limit(100);
 
     if (error) {
       console.error('加载待审核内容失败:', error);
       return;
     }
 
-    // 加载关联的内容数据
-    for (const item of data || []) {
-      if (item.content_type === 'game') {
-        const { data: gameData } = await supabase
-          .from('games')
-          .select('*')
-          .eq('id', item.content_id)
-          .single();
-        item.gameData = gameData;
-      }
+    // 批量加载提交者资料（避免行内外键关系要求）
+    const submitterIds = Array.from(new Set((data || []).map(i => i.submitter_id).filter(Boolean)));
+    if (submitterIds.length > 0) {
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .in('id', submitterIds);
+      const map = Object.fromEntries((profs || []).map(p => [p.id, p]));
+      (data || []).forEach(i => { i.submitterData = map[i.submitter_id] || null; });
+    }
+
+    // 批量加载关联的游戏数据，避免 N+1
+    const contentIds = Array.from(new Set((data || []).filter(i => i.content_type === 'game_submission').map(i => i.content_id).filter(Boolean)));
+    if (contentIds.length > 0) {
+      const { data: subs } = await supabase
+        .from('game_submissions')
+        .select('id, title, company, price, genres, background, gameplay, cover_url')
+        .in('id', contentIds);
+      const subMap = Object.fromEntries((subs || []).map(g => [g.id, g]));
+      (data || []).forEach(i => { if (i.content_type === 'game_submission') i.gameData = subMap[i.content_id] || null; });
     }
 
     pendingItems.value = data || [];
@@ -225,12 +233,9 @@ async function loadProcessedItems() {
   try {
     const { data, error } = await supabase
       .from('moderation_queue')
-      .select(`
-        *,
-        submitterData:submitter_id(id, name)
-      `)
+      .select('*')
       .in('status', ['approved', 'rejected'])
-      .eq('content_type', 'game')
+      .eq('content_type', 'game_submission')
       .order('moderated_at', { ascending: false })
       .limit(50);
 
@@ -239,16 +244,26 @@ async function loadProcessedItems() {
       return;
     }
 
-    // 加载关联的内容数据
-    for (const item of data || []) {
-      if (item.content_type === 'game') {
-        const { data: gameData } = await supabase
-          .from('games')
-          .select('title')
-          .eq('id', item.content_id)
-          .single();
-        item.gameData = gameData;
-      }
+    // 批量加载提交者资料
+    const submitterIds = Array.from(new Set((data || []).map(i => i.submitter_id).filter(Boolean)));
+    if (submitterIds.length > 0) {
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .in('id', submitterIds);
+      const map = Object.fromEntries((profs || []).map(p => [p.id, p]));
+      (data || []).forEach(i => { i.submitterData = map[i.submitter_id] || null; });
+    }
+
+    // 批量加载关联的游戏数据，避免 N+1
+    const contentIds = Array.from(new Set((data || []).filter(i => i.content_type === 'game_submission').map(i => i.content_id).filter(Boolean)));
+    if (contentIds.length > 0) {
+      const { data: subs } = await supabase
+        .from('game_submissions')
+        .select('id, title')
+        .in('id', contentIds);
+      const subMap = Object.fromEntries((subs || []).map(g => [g.id, g]));
+      (data || []).forEach(i => { if (i.content_type === 'game_submission') i.gameData = subMap[i.content_id] || null; });
     }
 
     processedItems.value = data || [];
@@ -264,26 +279,59 @@ async function approveContent(item) {
   isProcessing.value = true;
   
   try {
-    const { error } = await supabase
-      .from('moderation_queue')
-      .update({
-        status: 'approved',
-        moderator_id: store.user?.id,
-        moderated_at: new Date().toISOString()
-      })
-      .eq('id', item.id);
+    // 1) 读取草稿
+    const { data: submission, error: subErr } = await supabase
+      .from('game_submissions')
+      .select('*')
+      .eq('id', item.content_id)
+      .single();
+    if (subErr || !submission) { console.error('读取草稿失败:', subErr); alert('读取草稿失败'); return; }
 
-    if (error) {
-      console.error('审核通过失败:', error);
-      alert('审核通过失败，请稍后重试');
-      return;
+    // 2) 写入正式 games，并标记发布
+    const { data: gameRows, error: gErr } = await supabase
+      .from('games')
+      .insert([{
+        title: submission.title,
+        company: submission.company,
+        price: submission.price,
+        genres: submission.genres,
+        background: submission.background,
+        gameplay: submission.gameplay,
+        official_url: submission.official_url,
+        cover_url: submission.cover_url,
+        creator: submission.submitter_id,
+        is_published: true,
+        reviewed_at: new Date().toISOString()
+      }])
+      .select();
+    if (gErr || !Array.isArray(gameRows) || gameRows.length === 0) { console.error('写入 games 失败:', gErr); alert('发布失败'); return; }
+    const newGameId = gameRows[0].id;
+
+    // 3) 写入图集
+    const gallery = Array.isArray(submission.gallery_urls) ? submission.gallery_urls : [];
+    if (gallery.length) {
+      const imageRecords = gallery.map((url, idx) => ({ game_id: newGameId, image_url: url, position: idx, created_at: new Date().toISOString() }));
+      const { error: imgErr } = await supabase.from('game_images').insert(imageRecords);
+      if (imgErr) console.warn('写入图集失败（可忽略）:', imgErr);
     }
+
+    // 4) 更新审核队列状态
+    const { error: qErr } = await supabase
+      .from('moderation_queue')
+      .update({ status: 'approved', moderator_id: store.user?.id, moderated_at: new Date().toISOString() })
+      .eq('id', item.id);
+    if (qErr) console.warn('更新审核队列失败（可忽略）:', qErr);
+
+    // 5) 删除草稿（可选）
+    try { await supabase.from('game_submissions').delete().eq('id', item.content_id); } catch {}
+
 
     // 从待审核列表中移除
     pendingItems.value = pendingItems.value.filter(i => i.id !== item.id);
     
-    // 重新加载已处理列表
+    // 重新加载已处理列表并刷新前台目录
     await loadProcessedItems();
+    try { await loadDataFromSupabase(); } catch (e) { console.warn('刷新前台目录失败', e); }
     
     alert('内容已通过审核');
   } catch (error) {
@@ -334,8 +382,9 @@ async function confirmReject() {
     // 从待审核列表中移除
     pendingItems.value = pendingItems.value.filter(i => i.id !== currentRejectItem.value.id);
     
-    // 重新加载已处理列表
+    // 重新加载已处理列表并刷新前台目录（确保被拒绝内容不会出现在前台）
     await loadProcessedItems();
+    try { await loadDataFromSupabase(); } catch (e) { console.warn('刷新前台目录失败', e); }
     
     closeRejectModal();
     alert('内容已拒绝，系统消息已发送给提交者');
@@ -349,14 +398,15 @@ async function confirmReject() {
 
 // 查看详情
 function viewDetails(item) {
-  if (item.content_type === 'game') {
-    router.push(`/game/${item.content_id}`);
+  // 草稿暂无详情路由
+  if (item.content_type === 'game_submission') {
+    return;
   }
 }
 
 // 获取内容标题
 function getContentTitle(item) {
-  if (item.content_type === 'game') {
+  if (item.content_type === 'game_submission') {
     return item.gameData?.title || '未知游戏';
   }
   return '未知内容';
