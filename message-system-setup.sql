@@ -177,12 +177,30 @@ BEGIN
   IF OLD.status = 'pending' AND NEW.status IN ('approved', 'rejected') THEN
     -- 更新内容状态
     IF NEW.content_type = 'game' THEN
-      UPDATE public.games 
-      SET status = NEW.status,
-          reviewed_by = NEW.moderator_id,
-          reviewed_at = now(),
-          rejection_reason = NEW.rejection_reason
-      WHERE id = NEW.content_id;
+      -- 检查 games 表是否有 is_published 字段
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'games' 
+        AND column_name = 'is_published'
+      ) THEN
+        -- 如果有 is_published 字段，同时更新它
+        UPDATE public.games 
+        SET status = NEW.status,
+            is_published = CASE WHEN NEW.status = 'approved' THEN true ELSE false END,
+            reviewed_by = NEW.moderator_id,
+            reviewed_at = now(),
+            rejection_reason = NEW.rejection_reason
+        WHERE id = NEW.content_id;
+      ELSE
+        -- 如果没有 is_published 字段，只更新原有字段
+        UPDATE public.games 
+        SET status = NEW.status,
+            reviewed_by = NEW.moderator_id,
+            reviewed_at = now(),
+            rejection_reason = NEW.rejection_reason
+        WHERE id = NEW.content_id;
+      END IF;
     ELSIF NEW.content_type = 'post' THEN
       UPDATE public.posts 
       SET status = NEW.status,
