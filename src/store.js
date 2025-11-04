@@ -213,49 +213,43 @@ export async function loadDataFromSupabase() {
         };
       });
       
-      // 合并到现有游戏数据中，避免重复
-      const existingIds = new Set(store.games.map(g => g.supabase_id).filter(Boolean));
-      const newGames = convertedGames.filter(g => !existingIds.has(g.id));
-      store.games = [...newGames, ...store.games];
+      // 完全以数据库数据为准，替换本地数据（而不是合并）
+      store.games = convertedGames;
       
-      console.log(`已加载 ${newGames.length} 个游戏，包含图集数据`);
+      console.log(`已加载 ${convertedGames.length} 个游戏，包含图集数据`);
 
       // 批量加载评分聚合（avg/count），避免拉回所有评分行
       try {
-        const gameIds = newGames.map(g => g.id);
+        const gameIds = convertedGames.map(g => g.id);
         if (gameIds.length > 0) {
           const { data: aggs, error: aggErr } = await supabase
-            .from('ratings')
-            .select('game_id')
-            .in('game_id', gameIds)
-            ;
+            .rpc('get_ratings_agg', { game_ids: gameIds });
           if (aggErr) {
             console.warn('批量加载评分聚合失败:', aggErr);
           } else {
-            // 后端禁止聚合函数时，回退为计数查询每个游戏的评分行数
-            const idSet = new Set((aggs || []).map(r => r.game_id));
-            if (idSet.size > 0) {
-              const { data: rows, error: cntErr } = await supabase
-                .from('ratings')
-                .select('game_id')
-                .in('game_id', Array.from(idSet));
-              if (cntErr) {
-                console.warn('加载评分数量失败（可忽略）:', cntErr);
-              } else {
-                const countMap = {};
-                (rows || []).forEach(r => { countMap[r.game_id] = (countMap[r.game_id] || 0) + 1; });
-                store.games = store.games.map(g => (
-                  g.supabase_id && countMap[g.supabase_id]
-                    ? { ...g, count: countMap[g.supabase_id] }
-                    : g
-                ));
+            const map = {};
+            (aggs || []).forEach(r => {
+              map[r.game_id] = {
+                avg: Math.round((Number(r.avg) || 0) * 10) / 10,
+                count: Number(r.count) || 0
+              };
+            });
+            store.games = store.games.map(g => {
+              if (g.supabase_id && map[g.supabase_id]) {
+                const m = map[g.supabase_id];
+                return { ...g, avg: m.avg, count: m.count };
               }
-            }
+              return g;
+            });
           }
         }
       } catch (e) {
         console.warn('批量加载评分聚合异常:', e);
       }
+    } else {
+      // 数据库中没有游戏数据，清空本地游戏列表
+      store.games = [];
+      console.log('数据库中没有游戏数据，已清空本地列表');
     }
     
     // 加载帖子数据（包含图片）
@@ -303,12 +297,14 @@ export async function loadDataFromSupabase() {
         };
       });
       
-      // 合并到现有帖子数据中，避免重复
-      const existingPostIds = new Set(store.posts.map(p => p.supabase_id).filter(Boolean));
-      const newPosts = convertedPosts.filter(p => !existingPostIds.has(p.id));
-      store.posts = [...newPosts, ...store.posts];
+      // 完全以数据库数据为准，替换本地数据（而不是合并）
+      store.posts = convertedPosts;
       
-      console.log(`已加载 ${newPosts.length} 个帖子，包含图片数据`);
+      console.log(`已加载 ${convertedPosts.length} 个帖子，包含图片数据`);
+    } else {
+      // 数据库中没有帖子数据，清空本地帖子列表
+      store.posts = [];
+      console.log('数据库中没有帖子数据，已清空本地列表');
     }
     
     console.log('数据加载完成');

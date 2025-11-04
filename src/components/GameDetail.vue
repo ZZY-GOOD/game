@@ -1,40 +1,68 @@
 <template>
   <section class="panel" v-if="game">
-    <div class="header-row">
+    <!-- Steam风格：上方标题 -->
+    <div class="game-header">
       <h2>{{ game.title }}</h2>
-      <span v-if="game.genres?.length" class="badges">
-        <span class="badge" v-for="t in game.genres" :key="t">{{ t }}</span>
-      </span>
-      <span v-else class="badge">{{ game.genre }}</span>
-    </div>
-    
-    <div class="grid cols-2">
-      <div>
-        <p class="muted">公司/工作室：{{ game.company || '未知' }}</p>
-        <p>定价：<strong>¥{{ game.price }}</strong></p>
-        <p>
-          官网：
-          <a v-if="game.officialUrl" :href="game.officialUrl" target="_blank" rel="noopener noreferrer">
-            {{ game.officialUrl }}
-          </a>
-          <span v-else class="muted">未提供</span>
-        </p>
-        <div v-if="game.cover" class="cover">
-          <img :src="game.cover" :alt="game.title" />
-        </div>
-      </div>
-      <div>
-        <h3>游戏背景</h3>
-        <p class="text">{{ game.background || '暂无背景介绍。' }}</p>
-        <h3>玩法介绍</h3>
-        <p class="text">{{ game.gameplay || '暂无玩法介绍。' }}</p>
-      </div>
     </div>
 
-    <!-- 图片画廊轮播 -->
-    <div class="gallery-section">
-      <h3>图片画廊</h3>
-      <Carousel :images="galleryImages" />
+    <!-- Steam风格布局：左侧轮播 + 右侧信息卡 -->
+    <div class="steam-layout">
+      <!-- 左侧：图片轮播 -->
+      <div class="left-side">
+        <SteamStyleCarousel :images="galleryImages" />
+      </div>
+
+      <!-- 右侧：游戏信息卡 -->
+      <div class="right-side">
+        <div class="game-info-box">
+          <!-- 游戏描述 -->
+          <div class="game-description" v-if="game.background || game.gameplay">
+            <p v-if="game.background">{{ game.background }}</p>
+            <p v-if="game.gameplay">{{ game.gameplay }}</p>
+          </div>
+
+          <!-- 游戏详细信息 -->
+          <div class="game-details">
+            <div class="detail-row">
+              <span class="detail-label">最近评测：</span>
+              <span class="detail-value">
+                <span class="review-badge">{{ getReviewStatus() }}</span>
+                <span class="review-count">({{ totalRatings }})</span>
+              </span>
+            </div>
+
+            <div class="detail-row">
+              <span class="detail-label">发行日期：</span>
+              <span class="detail-value">{{ formatDate(game.createdAt) }}</span>
+            </div>
+
+            <div class="detail-row">
+              <span class="detail-label">开发者：</span>
+              <span class="detail-value detail-link">{{ game.company || '未知' }}</span>
+            </div>
+
+            <div class="detail-row">
+              <span class="detail-label">发行商：</span>
+              <span class="detail-value detail-link">{{ game.company || '未知' }}</span>
+            </div>
+          </div>
+
+          <!-- 游戏标签 -->
+          <div class="game-tags" v-if="game.genres?.length">
+            <span class="label-text">此产品的热门用户自定义标签：</span>
+            <div class="tags-list">
+              <button class="tag-btn" v-for="tag in game.genres" :key="tag">{{ tag }}</button>
+            </div>
+          </div>
+
+          <!-- 访问官网按钮 -->
+          <div class="purchase-area" v-if="game.officialUrl">
+            <a :href="game.officialUrl" target="_blank" class="official-site-btn" rel="noopener noreferrer">
+              访问官网
+            </a>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 评分系统 -->
@@ -176,13 +204,14 @@
 import { ref, computed, reactive, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { store, getGame, addRating, getAverageStars, getUserRating, withdrawUserRating, addGameComment, likeGameComment, deleteMyGame, deleteGame as deleteGameByModerator, loadGameComments, loadGameRatings, deleteGameComment } from '../store';
-import Carousel from './Carousel.vue';
+import SteamStyleCarousel from './SteamStyleCarousel.vue';
 import { getGalleryImages } from '../utils/imageUtils.js';
 
 const route = useRoute();
 const router = useRouter();
 const game = computed(() => getGame(route.params.id));
 const isOwner = computed(() => !!store.user && !!game.value && store.user.name === game.value.creator);
+const isModerator = computed(() => !!store.user && !!store.user.is_moderator);
 
 onMounted(async () => {
   if (game.value?.supabase_id) {
@@ -313,41 +342,223 @@ function formatTime(timestamp) {
   
   return date.toLocaleDateString();
 }
+
+function formatDate(timestamp) {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}年${month}月${day}日`;
+}
+
+// 计算评测状态（基于平均评分）
+function getReviewStatus() {
+  if (totalRatings.value === 0) {
+    return '无评测';
+  }
+  const avg = averageRating.value;
+  // 根据Steam评测标准
+  if (avg >= 4.5) {
+    return '特别好评';
+  } else if (avg >= 4.0) {
+    return '好评';
+  } else if (avg >= 3.5) {
+    return '多半好评';
+  } else if (avg >= 3.0) {
+    return '褒贬不一';
+  } else if (avg >= 2.5) {
+    return '多半差评';
+  } else {
+    return '差评';
+  }
+}
 </script>
 
 <style scoped>
-.header-row { display: flex; align-items: center; justify-content: space-between; }
+/* 页面容器 - 增加两边留白 */
+.panel {
+  max-width: 980px !important;
+  margin: 0 auto;
+  padding: 24px 32px !important;
+}
+
+/* Steam风格布局 */
+.game-header {
+  margin-bottom: 20px;
+}
+
+.game-header h2 {
+  font-size: 32px;
+  font-weight: 300;
+  color: #fff;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.steam-layout {
+  display: grid;
+  grid-template-columns: 616px 1fr;
+  gap: 20px;
+  margin-bottom: 32px;
+}
+
+.left-side {
+  min-width: 0;
+}
+
+.right-side {
+  min-width: 0;
+}
+
+/* 游戏信息卡片 */
+.game-info-box {
+  background: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.5) 100%);
+  border-radius: 4px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.game-description {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #acb2b8;
+  margin-bottom: 16px;
+}
+
+.game-description p {
+  margin: 0 0 12px 0;
+}
+
+.game-description p:last-child {
+  margin-bottom: 0;
+}
+
+/* 游戏详细信息 */
+.game-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.detail-row {
+  display: flex;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 6px;
+}
+
+.detail-label {
+  color: #556772;
+  width: 100px;
+  flex-shrink: 0;
+  font-weight: normal;
+}
+
+.detail-value {
+  color: #acb2b8;
+  flex: 1;
+}
+
+.review-badge {
+  color: #66c0f4;
+  font-weight: normal;
+}
+
+.review-count {
+  color: #acb2b8;
+}
+
+.detail-link {
+  color: #67c1f5;
+  cursor: pointer;
+}
+
+.detail-link:hover {
+  color: #fff;
+}
+
+.badge-tag {
+  display: inline-block;
+  background: rgba(103, 193, 245, 0.2);
+  color: #67c1f5;
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+/* 游戏标签 */
+.game-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.label-text {
+  font-size: 12px;
+  color: #556772;
+  margin-bottom: 10px;
+}
+
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-btn {
+  background: rgba(103, 193, 245, 0.2);
+  color: #67c1f5;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: normal;
+  line-height: 1.4;
+}
+
+.tag-btn:hover {
+  background: rgba(103, 193, 245, 0.3);
+  color: #fff;
+}
+
+/* 访问官网按钮区域 */
+.purchase-area {
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.official-site-btn {
+  display: block;
+  background: linear-gradient(to bottom, #75b022 5%, #588a1b 95%);
+  color: white;
+  text-decoration: none;
+  padding: 14px;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+}
+
+.official-site-btn:hover {
+  background: linear-gradient(to bottom, #8bc53f 5%, #75b022 95%);
+}
+
 .muted { color: var(--muted); }
-.badges { display: flex; gap: 6px; flex-wrap: wrap; }
-.cover { 
-  margin-top: 12px; 
-  width: 100%; 
-  min-height: 200px;
-  max-height: 350px; 
-  background: #0a0f1c; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  border: 1px solid var(--border); 
-  border-radius: 8px; 
-  overflow: hidden;
-  aspect-ratio: 3/4;
-}
-.cover img { 
-  max-width: 100%; 
-  max-height: 100%; 
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  border-radius: 6px;
-}
 .text { white-space: pre-wrap; line-height: 1.7; }
 .actions { margin-top: 24px; display: flex; gap: 8px; }
-
-/* 图片画廊 */
-.gallery-section {
-  margin: 24px 0;
-}
 
 /* 评分系统 */
 .rating-section {
@@ -674,25 +885,54 @@ function formatTime(timestamp) {
 }
 
 /* 响应式设计 */
-@media (max-width: 768px) {
-  .grid.cols-2 {
+@media (max-width: 1024px) {
+  .steam-layout {
     grid-template-columns: 1fr;
     gap: 20px;
   }
-  
-  .cover {
-    max-height: 280px;
-    aspect-ratio: 16/10;
+
+  .left-side {
+    order: 1;
   }
-  
-  .header-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
+
+  .right-side {
+    order: 2;
   }
-  
-  .badges {
-    align-self: stretch;
+
+  .game-info-box {
+    height: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .game-header h2 {
+    font-size: 22px;
+  }
+
+  .steam-layout {
+    gap: 16px;
+  }
+
+  .game-info-box {
+    padding: 12px;
+  }
+
+  .detail-label {
+    width: 80px;
+    font-size: 11px;
+  }
+
+  .detail-value {
+    font-size: 11px;
+  }
+
+  .price-value {
+    font-size: 18px;
+  }
+
+  .grid.cols-2 {
+    grid-template-columns: 1fr;
+    gap: 20px;
   }
   
   .stars-row {
@@ -714,6 +954,25 @@ function formatTime(timestamp) {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .game-header h2 {
+    font-size: 18px;
+  }
+
+  .game-description {
+    font-size: 12px;
+  }
+
+  .tags-list {
+    gap: 4px;
+  }
+
+  .tag-btn {
+    font-size: 10px;
+    padding: 4px 8px;
   }
 }
 .blocking-modal {
