@@ -300,7 +300,9 @@ async function approveContent(item) {
         official_url: submission.official_url,
         cover_url: submission.cover_url,
         creator: submission.submitter_id,
+        status: 'approved',
         is_published: true,
+        reviewed_by: store.user?.id,
         reviewed_at: new Date().toISOString()
       }])
       .select();
