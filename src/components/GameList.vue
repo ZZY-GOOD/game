@@ -1,6 +1,6 @@
 <template>
   <section class="panel">
-    <Carousel :images="carouselImages" @item-click="onCarouselClick" />
+    <SteamCarousel :games="carouselGames" />
     <div class="type-wrap">
       <button class="type-scroll ctrl prev" @click="scrollTypes(-1)">‹</button>
       <div class="type-grid" ref="typeGridRef">
@@ -57,7 +57,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { store, deleteGame as _deleteGame, getAverageStars } from '../store';
-import Carousel from './Carousel.vue';
+import SteamCarousel from './SteamCarousel.vue';
 
 function makeTitleDataUrl(title, w = 1400, h = 800, bg = '#0b1020', fg = '#FFFFFF') {
   try {
@@ -81,24 +81,17 @@ function makeTitleDataUrl(title, w = 1400, h = 800, bg = '#0b1020', fg = '#FFFFF
   }
 }
 
-const carouselImages = computed(() => {
-  // 1) 基于排行榜规则（avg 优先，count 次之）取前 5 个
+// 轮播游戏数据（取评分最高的前5个）
+const carouselGames = computed(() => {
   const enriched = store.games.map(g => {
     const avg = typeof g.avg === 'number' ? g.avg : getAverageStars(g);
     const count = typeof g.count === 'number' ? g.count : (Array.isArray(g.ratings) ? g.ratings.length : 0);
     return { ...g, _avg: avg || 0, _count: count || 0 };
   });
-  const top5 = enriched
+  
+  return enriched
     .sort((a, b) => b._avg - a._avg || b._count - a._count)
     .slice(0, 5);
-
-  // 2) 返回对象以支持点击跳转
-  return top5.map(g => {
-    const cover = g.cover && String(g.cover).trim();
-    const gallery0 = Array.isArray(g.gallery) && g.gallery.length > 0 ? g.gallery[0] : '';
-    const src = cover || gallery0 || makeTitleDataUrl(g.title);
-    return { src, id: g.id, title: g.title };
-  });
 });
 
 const allTypes = [
@@ -136,7 +129,6 @@ function scrollTypes(dir) {
 }
 const router = useRouter();
 function goGame(id){ router.push(`/game/${id}`); }
-function onCarouselClick(item){ if (item?.id) router.push(`/game/${item.id}`); }
 
 // 检查当前用户是否为审核员
 const isModerator = computed(() => store.user?.is_moderator || false);
