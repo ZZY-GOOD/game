@@ -5,11 +5,127 @@
       <h2>{{ game.title }}</h2>
     </div>
 
-    <!-- Steam风格布局：左侧轮播 + 右侧信息卡 -->
+    <!-- Steam风格布局：左侧轮播 + 评分评论 + 右侧信息卡 -->
     <div class="steam-layout">
-      <!-- 左侧：图片轮播 -->
+      <!-- 左侧：图片轮播 + 评分评论 -->
       <div class="left-side">
         <SteamStyleCarousel :images="galleryImages" />
+        
+        <!-- 评分系统 -->
+        <div class="rating-section-narrow">
+          <h3>评分</h3>
+          <div class="rating-container">
+            <div class="stars-display">
+              <div class="stars-row">
+                <span class="rating-label">平均：</span>
+                <div class="stars-avg">
+                  <span v-for="n in 5" :key="n" class="star" :class="{ filled: n <= Math.round(averageRating) }">★</span>
+                </div>
+                <span class="rating-text">{{ averageRating.toFixed(1) }} 星 · 共 {{ totalRatings }} 次评分</span>
+              </div>
+            </div>
+            
+            <div class="user-rating">
+              <div class="rating-input">
+                <span class="rating-label">我的评分：</span>
+                <div class="stars-input">
+                  <button
+                    v-for="n in 5"
+                    :key="n"
+                    class="star-btn"
+                    :class="{ 
+                      active: n <= (hover || userRating),
+                      'user-rated': userRating > 0 && n <= userRating
+                    }"
+                    @mouseenter="hover = n"
+                    @mouseleave="hover = 0"
+                    @click="rate(n)"
+                    :aria-label="`评分 ${n} 星`"
+                  >★</button>
+                </div>
+                <button 
+                  v-if="userRating > 0" 
+                  class="btn-withdraw" 
+                  @click="withdrawRating"
+                  title="撤回评分"
+                >
+                  撤回
+                </button>
+              </div>
+              <div v-if="userRating > 0" class="user-rating-text">
+                您已评分：{{ userRating }} 星
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 评论区 -->
+        <div class="comments-section-narrow">
+          <div class="comments-header">
+            <h3>评价和评论</h3>
+            <span class="comments-count">{{ comments.length }} 条评论</span>
+          </div>
+          
+          <!-- 发表评论 -->
+          <div class="comment-form">
+            <div class="form-header">
+              <div class="user-avatar">
+                <div class="avatar-placeholder">{{ newComment.author.charAt(0) || '匿' }}</div>
+              </div>
+              <div class="form-content">
+                <input 
+                  v-model="newComment.author" 
+                  class="author-input" 
+                  placeholder="输入您的昵称"
+                  maxlength="20"
+                />
+              </div>
+            </div>
+            <textarea 
+              v-model="newComment.content" 
+              class="comment-textarea" 
+              placeholder="写下您的评价..."
+              rows="3"
+              maxlength="500"
+            ></textarea>
+            <div class="form-actions">
+              <span class="char-count">{{ newComment.content.length }}/500</span>
+              <button class="btn-submit" @click="submitComment" :disabled="!canSubmit">
+                发表评论
+              </button>
+            </div>
+          </div>
+
+          <!-- 评论列表 -->
+          <div class="comments-list">
+            <div v-for="comment in comments" :key="comment.id" class="comment-item">
+              <div class="comment-header">
+                <div class="comment-avatar">
+                  <div class="avatar-placeholder">{{ comment.author.charAt(0) }}</div>
+                </div>
+                <div class="comment-info">
+                  <div class="comment-author">{{ comment.author }}</div>
+                  <div class="comment-rating" v-if="comment.rating">
+                    <span v-for="n in 5" :key="n" class="comment-star" :class="{ filled: n <= comment.rating }">★</span>
+                  </div>
+                  <div class="comment-time">{{ formatTime(comment.createdAt) }}</div>
+                  <button v-if="canWithdrawComment(comment)" class="link danger" :disabled="isWithdrawingComment" @click="withdrawComment(comment)">撤回</button>
+                </div>
+              </div>
+              <div class="comment-content">{{ comment.content }}</div>
+              <div class="comment-actions">
+                <button class="action-btn" @click="likeComment(comment.id)">
+                  <span class="action-icon">👍</span>
+                  <span>{{ comment.likes || 0 }}</span>
+                </button>
+              </div>
+            </div>
+            
+            <div v-if="comments.length === 0" class="empty-comments">
+              暂无评论，快来发表第一条评价吧！
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 右侧：游戏信息卡 -->
@@ -61,122 +177,6 @@
               访问官网
             </a>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 评分系统 -->
-    <div class="rating-section">
-      <h3>评分</h3>
-      <div class="rating-container">
-        <div class="stars-display">
-          <div class="stars-row">
-            <span class="rating-label">平均：</span>
-            <div class="stars-avg">
-              <span v-for="n in 5" :key="n" class="star" :class="{ filled: n <= Math.round(averageRating) }">★</span>
-            </div>
-            <span class="rating-text">{{ averageRating.toFixed(1) }} 星 · 共 {{ totalRatings }} 次评分</span>
-          </div>
-        </div>
-        
-        <div class="user-rating">
-          <div class="rating-input">
-            <span class="rating-label">我的评分：</span>
-            <div class="stars-input">
-              <button
-                v-for="n in 5"
-                :key="n"
-                class="star-btn"
-                :class="{ 
-                  active: n <= (hover || userRating),
-                  'user-rated': userRating > 0 && n <= userRating
-                }"
-                @mouseenter="hover = n"
-                @mouseleave="hover = 0"
-                @click="rate(n)"
-                :aria-label="`评分 ${n} 星`"
-              >★</button>
-            </div>
-            <button 
-              v-if="userRating > 0" 
-              class="btn-withdraw" 
-              @click="withdrawRating"
-              title="撤回评分"
-            >
-              撤回
-            </button>
-          </div>
-          <div v-if="userRating > 0" class="user-rating-text">
-            您已评分：{{ userRating }} 星
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 评论区 -->
-    <div class="comments-section">
-      <div class="comments-header">
-        <h3>评价和评论</h3>
-        <span class="comments-count">{{ comments.length }} 条评论</span>
-      </div>
-      
-      <!-- 发表评论 -->
-      <div class="comment-form">
-        <div class="form-header">
-          <div class="user-avatar">
-            <div class="avatar-placeholder">{{ newComment.author.charAt(0) || '匿' }}</div>
-          </div>
-          <div class="form-content">
-            <input 
-              v-model="newComment.author" 
-              class="author-input" 
-              placeholder="输入您的昵称"
-              maxlength="20"
-            />
-          </div>
-        </div>
-        <textarea 
-          v-model="newComment.content" 
-          class="comment-textarea" 
-          placeholder="写下您的评价..."
-          rows="3"
-          maxlength="500"
-        ></textarea>
-        <div class="form-actions">
-          <span class="char-count">{{ newComment.content.length }}/500</span>
-          <button class="btn-submit" @click="submitComment" :disabled="!canSubmit">
-            发表评论
-          </button>
-        </div>
-      </div>
-
-      <!-- 评论列表 -->
-      <div class="comments-list">
-        <div v-for="comment in comments" :key="comment.id" class="comment-item">
-          <div class="comment-header">
-            <div class="comment-avatar">
-              <div class="avatar-placeholder">{{ comment.author.charAt(0) }}</div>
-            </div>
-            <div class="comment-info">
-              <div class="comment-author">{{ comment.author }}</div>
-              <div class="comment-rating" v-if="comment.rating">
-                <span v-for="n in 5" :key="n" class="comment-star" :class="{ filled: n <= comment.rating }">★</span>
-              </div>
-              <div class="comment-time">{{ formatTime(comment.createdAt) }}</div>
-              <button v-if="canWithdrawComment(comment)" class="link danger" :disabled="isWithdrawingComment" @click="withdrawComment(comment)">撤回</button>
-            </div>
-          </div>
-          <div class="comment-content">{{ comment.content }}</div>
-          <div class="comment-actions">
-            <button class="action-btn" @click="likeComment(comment.id)">
-              <span class="action-icon">👍</span>
-              <span>{{ comment.likes || 0 }}</span>
-            </button>
-          </div>
-        </div>
-        
-        <div v-if="comments.length === 0" class="empty-comments">
-          暂无评论，快来发表第一条评价吧！
         </div>
       </div>
     </div>
@@ -569,6 +569,15 @@ function getReviewStatus() {
   border-radius: 12px;
 }
 
+/* 评分系统 - 窄版（位于左侧） */
+.rating-section-narrow {
+  margin-top: 20px;
+  padding: 20px;
+  background: #0b1020;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
 .rating-container {
   display: flex;
   flex-direction: column;
@@ -677,6 +686,11 @@ function getReviewStatus() {
 /* 评论区 */
 .comments-section {
   margin: 24px 0;
+}
+
+/* 评论区 - 窄版（位于左侧） */
+.comments-section-narrow {
+  margin-top: 20px;
 }
 
 .comments-header {
@@ -901,6 +915,12 @@ function getReviewStatus() {
 
   .game-info-box {
     height: auto;
+  }
+
+  /* 在移动端保持窄版样式的布局连贯性 */
+  .rating-section-narrow,
+  .comments-section-narrow {
+    margin-top: 20px;
   }
 }
 
