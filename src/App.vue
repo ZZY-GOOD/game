@@ -62,7 +62,7 @@
       <router-view :key="$route.fullPath" />
     </main>
     <footer class="footer">
-      <small>© 2025 游戏论坛. 仅用于演示，数据保存在浏览器。</small>
+      
     </footer>
   </div>
 </template>
